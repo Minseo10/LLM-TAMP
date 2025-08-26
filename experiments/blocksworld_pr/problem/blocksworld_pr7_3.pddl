@@ -1,0 +1,30 @@
+(define (problem blocksworld_pr7_3)
+  (:domain blocksworld-original)
+  (:objects
+    cyan blue red brown yellow green grey
+  )
+  (:init
+    (arm-empty)
+    (on-table cyan)
+    (on blue cyan)
+    (on red blue)
+    (clear red)
+    (on-table brown)
+    (on yellow brown)
+    (clear yellow)
+    (on-table green)
+    (on grey green)
+    (clear grey)
+  )
+  (:goal
+    (and
+      (on-table brown)
+      (on green brown)
+      (on blue green)
+      (on-table yellow)
+      (on-table red)
+      (on cyan red)
+      (on grey cyan)
+    )
+  )
+)

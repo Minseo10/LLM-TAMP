@@ -32,18 +32,20 @@ from utils.pb_util import (
     set_point,
     get_pose,
     set_static,
-    add_data_path,
+    add_data_path, DRAKE_IIWA_URDF,
 )
 from utils.tamp_util import Action, TAMPFeedback
 from envs.constants import ASSETS_DIR, COLOR_FRANKA, FRANKA_Limits, BROWN, TAN
-
+from utils.pybullet_utils import *
+from utils.pr2_utils import *
 logger = logging.getLogger(__name__)
 
 
 BOX_PATH = os.path.join(ASSETS_DIR, "box_obstacle3.obj")
 HOOK_PATH = os.path.join(ASSETS_DIR, "hook.obj")
 FRANKA_ROBOT_URDF = os.path.join(ASSETS_DIR, "franka_description", "robots", "panda_arm_hand.urdf")
-
+PR2_URDF = os.path.join(ASSETS_DIR, "pr2_description", "pr2.urdf")
+KUKA_URDF = os.path.join(ASSETS_DIR,"drake", "iiwa_description", "urdf", "iiwa14_polytype_collision.urdf")
 
 class PybulletEnv:
     def __init__(self):
@@ -63,13 +65,13 @@ class PybulletEnv:
     def body_id_name_mapping(self):
         return {v: k for k, v in self._objects.items()}
 
-    def reset(self, use_gui=True):
+    def reset(self, use_gui=True, domain_name="packing"):
         # destroy the current simulation
         self.destroy()
 
         # connect to pybullet
         connect(use_gui=use_gui)
-        p.setGravity(0, 0, -10)
+        p.setGravity(0, 0, -9.8)
 
         # add floor
         add_data_path()
@@ -79,7 +81,7 @@ class PybulletEnv:
         self._objects = {}
 
         # add pybullet robot
-        self.robot = PyBulletRobot()
+        self.robot = PyBulletRobot(domain_name=domain_name)
 
         # reset camera
         p.resetDebugVisualizerCamera(
@@ -156,6 +158,37 @@ class PybulletEnv:
         set_point(table_body, [x, y, z])
         self._objects[name] = table_body
 
+    def create_blocksworld_table(self, name="table", width=0.6, length=1.4, height=0.71, thickness=0.03, radius=0.015,
+                     top_color=(0.7, 0.7, 0.7, 1.), leg_color=TAN, cylinder=True, center=(0.55, 0.0), **kwargs):
+        # TODO: table URDF
+        surface = get_box_geometry(width, length, thickness)
+        surface_pose = Pose(Point(x=center[0], y=center[1], z=height - thickness / 2.))  # x=0.55, y=0.0,
+
+        leg_height = height - thickness
+        if cylinder:
+            leg_geometry = get_cylinder_geometry(radius, leg_height)
+        else:
+            leg_geometry = get_box_geometry(width=2 * radius, length=2 * radius, height=leg_height)
+        legs = [leg_geometry for _ in range(4)]
+        leg_center = np.array([width, length]) / 2. - radius * np.ones(2)
+        leg_xys_local = [np.multiply(leg_center, np.array(signs))
+                         for signs in product([-1, +1], repeat=len(leg_center))]
+        leg_poses = [Pose(point=[center[0] + x, center[1] + y, leg_height / 2.])
+                     for x, y in leg_xys_local]
+
+        geoms = [surface] + legs
+        poses = [surface_pose] + leg_poses
+        colors = [top_color] + len(legs) * [leg_color]
+
+        collision_id, visual_id = create_shape_array(geoms, poses, colors)
+        body = create_body(collision_id, visual_id, **kwargs)
+
+        # TODO: unable to use several colors
+        # for idx, color in enumerate(geoms):
+        #    set_color(body, shape_index=idx, color=color)
+        self._objects[name] = body
+        return body
+
     def create_basket(self, name="basket", color=BROWN, x=0.6, y=0, z=0.002, w=0.2, l=0.4, h=0.01):
         basket_body = create_box(w=w, l=l, h=h, color=color)
         set_point(basket_body, [x, y, z])
@@ -172,6 +205,43 @@ class PybulletEnv:
         set_pose(box_body, Pose(point=[x, y, z], euler=np.array([theta, 0, 0])))
         self._objects[name] = box_body
         self.theta_dict[name] = 0
+
+    def bring_blocks(self, domain_name, json_path, prob_num, prob_idx, trial):
+        def _find_entry(meta, prob_num, prob_idx, trial):
+            for e in meta:
+                if e.get("num") == prob_num and e.get("index") == prob_idx and e.get("trial") == trial:
+                    return e
+            return None
+
+        with open(json_path, "r", encoding="utf-8") as f:
+            meta = json.load(f)
+        entry = _find_entry(meta, prob_num, prob_idx, trial)
+
+        if not entry or "objects" not in entry:
+            print(f"[bring_blocks] No entry/objects for (num={prob_num}, idx={prob_idx}, trial={trial})")
+            return
+
+        for name, blk in entry["objects"].items():
+            size = blk.get("size", [0.08, 0.08, 0.08])
+            pos = blk["pose"]["position"]  # [x, y, z]
+            quat = blk["pose"]["quaternion"]  # [x, y, z, w]
+
+            if name not in self._objects:
+                self.create_customized_box(
+                    name=name,
+                    color=COLOR_MAP[name] if domain_name=='blocksworld_pr' else food_specs[name],
+                    w=size[0], l=size[1], h=size[2],
+                    x=pos[0], y=pos[1], z=pos[2],
+                    theta=0.0
+                )
+
+            bid = self._objects[name]
+            set_pose(bid, (tuple(pos), tuple(quat)))
+            from scipy.spatial.transform import Rotation as R
+            rot = R.from_quat(quat)
+            roll, pitch, yaw = rot.as_euler('xyz', degrees=False)
+            self.theta_dict[name] = float(yaw)
+
 
     def create_tool(self, name, color, x, y, z, theta=np.pi):
         tool_body = create_obj(HOOK_PATH, scale=0.3, color=color, mass=1.0)
@@ -203,12 +273,22 @@ class PybulletEnv:
 
 
 class PyBulletRobot:
-    def __init__(self):
+    def __init__(self, domain_name):
         # load robot: Franka FR3 for now
-        self.robot = load_pybullet(FRANKA_ROBOT_URDF, fixed_base=True)
-        assign_link_colors(self.robot, colors=COLOR_FRANKA)
-        self.ik_joints = get_movable_joints(self.robot)
-        self.tool_attach_link = link_from_name(self.robot, "tool_link")
+        if domain_name == "packing":
+            self.robot = load_pybullet(FRANKA_ROBOT_URDF, fixed_base=True)
+            tool_link = "tool_link"
+            self.ik_joints = get_movable_joints(self.robot)
+        elif domain_name == "blocksworld_pr":
+            self.robot = load_pybullet(PR2_URDF, fixed_base=True)
+            tool_link = "l_gripper_tool_frame"
+            self.ik_joints = joints_from_names(self.robot, PR2_GROUPS['left_arm'])
+        elif domain_name == "kitchen":
+            self.robot = load_pybullet(DRAKE_IIWA_URDF, fixed_base=True)
+            tool_link = 'iiwa_link_ee_kuka'
+            self.ik_joints = get_movable_joints(self.robot)
+        # assign_link_colors(self.robot, colors=COLOR_FRANKA)
+        self.tool_attach_link = link_from_name(self.robot, tool_link)
 
         # set static: important that the robot is static during planning
         set_static(self.robot)
@@ -218,33 +298,85 @@ class PyBulletRobot:
         self.last_grasp_direction = None
 
         # set grasping offset: position and orientation
-        self.position_offset_dict = {
-            "top": np.array([0.0, 0, 0.05]),
-            "left": np.array([0.5, -0.15, 0]),
-            "right": np.array([0, 0.08, 0]),
-            "forward": np.array([-0.1, 0, 0]),
-        }
+        if domain_name == "packing":
+            self.position_offset_dict = {
+                "top": np.array([0.0, 0, 0.05]),
+                "left": np.array([0.5, -0.15, 0]),
+                "right": np.array([0, 0.08, 0]),
+                "forward": np.array([-0.1, 0, 0]),
+            }
 
-        x_axis_positive = [0, 0.7071068, 0, 0.7071068]
-        x_axis_negative = [0, -0.7071068, 0, 0.7071068]
-        y_axis_negative = [0.7068252, 0, 0, 0.7073883]
-        y_axis_positive = [-0.7068252, 0, 0, 0.7073883]
-        z_axis_positive = [0, 0, 0, 1]
-        z_axis_negative = [1, 0, 0, 0]
-        self.rotation_offset_dict = {
-            "top": z_axis_negative,
-            "left": y_axis_positive,
-            "right": y_axis_negative,
-            "forward": x_axis_positive,
-            "backward": x_axis_negative,
-        }
+            x_axis_positive = [0, 0.7071068, 0, 0.7071068]
+            x_axis_negative = [0, -0.7071068, 0, 0.7071068]
+            y_axis_negative = [0.7068252, 0, 0, 0.7073883]
+            y_axis_positive = [-0.7068252, 0, 0, 0.7073883]
+            z_axis_positive = [0, 0, 0, 1]
+            z_axis_negative = [1, 0, 0, 0]
+            self.rotation_offset_dict = {
+                "top": z_axis_negative,
+                "left": y_axis_positive,
+                "right": y_axis_negative,
+                "forward": x_axis_positive,
+                "backward": x_axis_negative,
+            }
+        elif domain_name == "blocksworld_pr":
+            self.position_offset_dict = {
+                "top": np.array([0.0, 0, 0.10]),
+                "left": np.array([0.5, -0.15, 0]),
+                "right": np.array([0, 0.08, 0]),
+                "forward": np.array([-0.1, 0, 0]),
+            }
+
+            x_axis_positive = [0, 0.7071068, 0, 0.7071068]
+            x_axis_negative = [0, -0.7071068, 0, 0.7071068]
+            y_axis_negative = [0.7068252, 0, 0, 0.7073883]
+            y_axis_positive = [-0.7068252, 0, 0, 0.7073883]
+            z_axis_positive = [0, 0, 0, 1]
+            z_axis_negative = [1, 0, 0, 0]
+            self.rotation_offset_dict = {
+                "top": z_axis_negative,
+                "left": y_axis_positive,
+                "right": y_axis_negative,
+                "forward": x_axis_positive,
+                "backward": x_axis_negative,
+            }
+        elif domain_name == "kitchen":
+            self.position_offset_dict = {
+                "top": np.array([0.0, 0, 0.20]),
+                "left": np.array([0.5, -0.15, 0]),
+                "right": np.array([0, 0.08, 0]),
+                "forward": np.array([-0.1, 0, 0]),
+            }
+
+            x_axis_positive = [0, 0.7071068, 0, 0.7071068]
+            x_axis_negative = [0, -0.7071068, 0, 0.7071068]
+            y_axis_negative = [0.7068252, 0, 0, 0.7073883]
+            y_axis_positive = [-0.7068252, 0, 0, 0.7073883]
+            z_axis_positive = [0, 0, 0, 1]
+            z_axis_negative = [1, 0, 0, 0]
+            self.rotation_offset_dict = {
+                "top": x_axis_negative,  # TODO
+                "left": y_axis_positive,
+                "right": y_axis_negative,
+                "forward": x_axis_positive,
+                "backward": x_axis_negative,
+            }
 
         # initialize pose
-        self.initialize_pose()
+        self.initialize_pose(domain_name)
 
-    def initialize_pose(self):
-        home_conf = [0, -0.785398163397, 0, -2.35619449, 0, 1.57079632679, 0.78539816, 0.04, 0.04]
-        set_joint_positions(self.robot, self.ik_joints, home_conf)
+    def initialize_pose(self,domain_name="packing"):
+        if domain_name == "packing":
+            home_conf = [0, -0.785398163397, 0, -2.35619449, 0, 1.57079632679, 0.78539816, 0.04, 0.04]
+            set_joint_positions(self.robot, self.ik_joints, home_conf)
+        elif domain_name == "blocksworld_pr":
+            set_joint_positions(self.robot, joints_from_names(self.robot, PR2_GROUPS['left_arm']), TOP_HOLDING_LEFT_ARM)
+            set_joint_positions(self.robot, joints_from_names(self.robot, PR2_GROUPS['right_arm']),
+                                rightarm_from_leftarm(REST_LEFT_ARM))
+            set_joint_positions(self.robot, joints_from_names(self.robot, PR2_GROUPS['torso']), [0.24])
+        elif domain_name == "kitchen":
+            home_conf = [0, 0, 0, 0, 0, 0, 0]
+            set_joint_positions(self.robot, self.ik_joints, home_conf)
 
     def pick(self, object, obstacles, grasp_direction, traj=None, play_traj=True):
         assert grasp_direction in self.position_offset_dict.keys(), "Unknown grasp direction!"

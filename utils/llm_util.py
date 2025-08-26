@@ -65,7 +65,7 @@ class GPT_Chat:
             timeout=60,
             max_retries=5,
             http_client=httpx.Client(
-                proxies=OPENAI_KEYS["proxy"],
+                # proxies=OPENAI_KEYS["proxy"],
                 transport=httpx.HTTPTransport(local_address="0.0.0.0"),
             ),
         )

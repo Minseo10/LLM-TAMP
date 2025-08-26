@@ -7,6 +7,7 @@ from envs.pb_env import PybulletEnv
 from utils.io_util import load_json, dump_json
 from utils.tamp_util import Action, PrimitiveAction, Parameter
 from utils.llm_util import textualize_array
+from utils.pybullet_utils import *
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
@@ -37,32 +38,43 @@ class PackCompactEnv(PybulletEnv):
     def __str__(self):
         return "PackCompactEnv"
 
-    def reset(self, basket, boxes, use_gui=True):
-        super().reset(use_gui=use_gui)
+    def reset(self, json_path, prob_num, prob_idx, trial, basket=None, boxes=None,use_gui=True, domain_name="packing"):
+        super().reset(use_gui=use_gui, domain_name=domain_name)  # bring robot
 
         # create table
-        self.create_table()
+        if domain_name == "blocksworld_pr":
+            self.create_blocksworld_table()
+        elif domain_name == "packing":
+            self.create_table()
 
         # create basket
-        self.create_basket(x=basket["x"], y=basket["y"], w=basket["w"], l=basket["l"])
+        if domain_name == "packing":
+            self.create_basket(x=basket["x"], y=basket["y"], w=basket["w"], l=basket["l"])
+        elif domain_name == "kitchen":
+            self.create_box("mystove", BLUE, x=0.5, y=0.0, z=0.025)
+            self.create_box("mysink", RED, x=-0.5, y=0.0, z=0.025)
 
-        # create boxes
-        for box_info in boxes.values():
-            self.create_customized_box(
-                name=box_info["name"],
-                color=box_info["color"],
-                w=box_info["w"],
-                l=box_info["l"],
-                h=box_info["h"],
-                x=box_info["x"],
-                y=box_info["y"],
-                z=box_info["z"],
-                theta=np.pi,
-            )
+        # create objects
+        if domain_name == "packing":
+            for box_info in boxes.values():
+                self.create_customized_box(
+                    name=box_info["name"],
+                    color=box_info["color"],
+                    w=box_info["w"],
+                    l=box_info["l"],
+                    h=box_info["h"],
+                    x=box_info["x"],
+                    y=box_info["y"],
+                    z=box_info["z"],
+                    theta=np.pi,
+                )
+        elif domain_name == "blocksworld_pr" or domain_name == "kitchen":
+            self.bring_blocks(domain_name, json_path, prob_num, prob_idx, trial)
+
         # physical simulation
         self.simulate()
 
-        observation = self.get_observation()
+        observation = self.get_observation(domain_name=domain_name)
         return observation
 
     def apply_action(self, action: Action, play_traj: bool = False):
@@ -129,25 +141,40 @@ class PackCompactEnv(PybulletEnv):
 
         return success, mp_feedback
 
-    def get_observation(self):
+    def get_observation(self, domain_name="packing"):
         observation = super().get_observation()
         # remove table & basket from observation
-        observation.pop("table")
-        basket_obs = observation.pop("basket")
+        if domain_name == "blocksworld_pr" or domain_name == "packing":
+            observation.pop("table")
+        if domain_name == "packing":
+            basket_obs = observation.pop("basket")
+            # textualize observation
+            # add basket info
+            x_range = np.array([basket_obs["bb_min"][0], basket_obs["bb_max"][0]])
+            y_range = np.array([basket_obs["bb_min"][1], basket_obs["bb_max"][1]])
+            basket_text = f"The basket has a rectangular shape, ranges {textualize_array(x_range)} along the x axis, and ranges {textualize_array(y_range)} along the y axis."
+        if domain_name == "kitchen":
+            stove_obs = observation.pop("mystove")
+            x_range = np.array([stove_obs["bb_min"][0], stove_obs["bb_max"][0]])
+            y_range = np.array([stove_obs["bb_min"][1], stove_obs["bb_max"][1]])
+            z_range = np.array([stove_obs["bb_min"][2], stove_obs["bb_max"][2]])
+            stove_text = f"The stove has a rectangular shape, ranges {textualize_array(x_range)} along the x axis, and ranges {textualize_array(y_range)} along the y axis."
 
-        # textualize observation
-        # add basket info
-        x_range = np.array([basket_obs["bb_min"][0], basket_obs["bb_max"][0]])
-        y_range = np.array([basket_obs["bb_min"][1], basket_obs["bb_max"][1]])
-        basket_text = f"The basket has a rectangular shape, ranges {textualize_array(x_range)} along the x axis, and ranges {textualize_array(y_range)} along the y axis."
+            sink_obs = observation.pop("mysink")
+            x_range = np.array([sink_obs["bb_min"][0], sink_obs["bb_max"][0]])
+            y_range = np.array([sink_obs["bb_min"][1], sink_obs["bb_max"][1]])
+            z_range = np.array([sink_obs["bb_min"][2], sink_obs["bb_max"][2]])
+            sink_text = f"The sink has a rectangular shape, ranges {textualize_array(x_range)} along the x axis, and ranges {textualize_array(y_range)} along the y axis."
+
 
         # add box info
-        boxes_text = f"There are several boxes in the envrionment: {', '.join(observation.keys())}."
+        boxes_text = f"There are several blocks in the envrionment: {', '.join(observation.keys())}."
         for object_name, object_state in observation.items():
             boxes_text += f"\n{object_name} is at position {textualize_array(object_state['position'])}, and it has min bounding box corner {textualize_array(object_state['bb_min'])} and max bounding box corner {textualize_array(object_state['bb_max'])},"
             width = object_state["bb_max"][0] - object_state["bb_min"][0]
             length = object_state["bb_max"][1] - object_state["bb_min"][1]
-            boxes_text += f"its length along x axis is {textualize_array(width)}, its length along y axis is {textualize_array(length)}."
+            height = object_state["bb_max"][2] - object_state["bb_min"][2]
+            boxes_text += f"its length along x axis is {textualize_array(width)}, its length along y axis is {textualize_array(length)}, and it's height along z axis is {textualize_array(height)}."
 
         # predicate info
         predicate_list = []
@@ -159,7 +186,10 @@ class PackCompactEnv(PybulletEnv):
 
         predicate_text = ", ".join(predicate_list) + "."
 
-        obs_text = basket_text + "\n" + boxes_text + "\n" + predicate_text
+        if domain_name == "packing":
+            obs_text = basket_text + "\n" + boxes_text + "\n" + predicate_text
+        elif domain_name == "kitchen":
+            obs_text = sink_text + "\n" + stove_text + "\n"+ boxes_text + "\n" + predicate_text
         return observation, obs_text
 
     def get_symbolic_plan(self):
