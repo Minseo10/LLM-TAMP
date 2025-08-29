@@ -47,10 +47,17 @@ class LLMTAMPPlanner(BasePlanner, LLMBase):
         self._trace = []
 
     def _prepare_planning_prompt(
-        self, obs_text: str, feedback_text: str, symbolic_plan: List[str] = []
+        self, obs_text: str, goal_text:str, feedback_text: str, domain:str, problem:str, symbolic_plan: List[str] = []
     ):
         # replace state
         planning_prompt = self._planning_prompt.replace("{state}", obs_text)
+
+        # replace goal
+        planning_prompt = planning_prompt.replace("{goal}", goal_text)
+
+        # replace domain/problem pddl
+        # planning_prompt = planning_prompt.replace("{domain}", domain)
+        # planning_prompt = planning_prompt.replace("{problem}", problem)
 
         # replace trace
         trace_text = "\n"
@@ -75,7 +82,11 @@ class LLMTAMPPlanner(BasePlanner, LLMBase):
 
     def plan(
         self,
+        domain_name: str,
+        prob_num: int,
+        prob_idx: int,
         obs_text: str,
+        goal_text:str,
         feedback_list: List[Tuple[Action, TAMPFeedback]],
         symbolic_plan: List[str] = [],
         *args,
@@ -102,8 +113,16 @@ class LLMTAMPPlanner(BasePlanner, LLMBase):
         if len(feedback_list) > 0 and feedback_list[-1][1].action_success:
             feedback_text += f"(Task: {feedback_list[-1][1].task_process_feedback})"
 
+        domain_path = f"/home/minseo/develop/LLM-TAMP/experiments/{domain_name}/domain_{domain_name}.pddl"
+        with open(domain_path, "r") as f:
+            domain = f.read()
+
+        problem_path = f"/home/minseo/develop/LLM-TAMP/experiments/{domain_name}/problem/{domain_name}{prob_num}_{prob_idx}.pddl"
+        with open(problem_path, "r") as f:
+            problem = f.read()
+
         # plan
-        planning_prompt = self._prepare_planning_prompt(obs_text, feedback_text, symbolic_plan)
+        planning_prompt = self._prepare_planning_prompt(obs_text, goal_text, feedback_text, domain, problem, symbolic_plan)
 
         plan_iter = 0
         plan, reasoning = None, None

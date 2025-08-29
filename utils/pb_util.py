@@ -73,7 +73,7 @@ ROOMBA_URDF = join_paths(MODEL_DIRECTORY, 'turtlebot/roomba.urdf')
 FR3_URDF = join_paths(MODEL_DIRECTORY, 'turtlebot/fr3_hand.urdf')
 TURTLEBOT_URDF = join_paths(MODEL_DIRECTORY, 'turtlebot/turtlebot.urdf')
 
-DRAKE_IIWA_URDF = join_paths(MODEL_DIRECTORY, 'drake/iiwa_description/urdf/iiwa14_polytope_collision.urdf')
+# DRAKE_IIWA_URDF = join_paths(MODEL_DIRECTORY, 'drake/iiwa_description/urdf/iiwa14_polytope_collision.urdf')
 WSG_50_URDF = join_paths(MODEL_DIRECTORY, 'drake/wsg_50_description/urdf/wsg_50_mesh_visual.urdf') # wsg_50 | wsg_50_mesh_visual | wsg_50_mesh_collision
 #SCHUNK_URDF = join_paths(MODEL_DIRECTORY, 'drake/wsg_50_description/sdf/schunk_wsg_50.sdf')
 PANDA_HAND_URDF = join_paths(MODEL_DIRECTORY, 'franka_description/robots/hand.urdf')
@@ -2305,7 +2305,7 @@ def get_link_state(body, link, kinematics=True, velocity=True):
     # TODO: the defaults are set to False?
     # https://github.com/bulletphysics/bullet3/blob/master/examples/pybullet/pybullet.c
     return LinkState(*p.getLinkState(body, link,
-                                     #computeForwardKinematics=kinematics,
+                                     computeForwardKinematics=kinematics,
                                      #computeLinkVelocity=velocity,
                                      physicsClientId=CLIENT))
 

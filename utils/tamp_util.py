@@ -96,3 +96,10 @@ def text_to_actions(text: List[str], primitive_actions: Dict[str, PrimitiveActio
         action_plan.append(action)
 
     return action_plan
+
+
+def find_entry(meta, prob_num, prob_idx, trial):
+    for e in meta:
+        if e.get("num") == prob_num and e.get("index") == prob_idx and e.get("trial") == trial:
+            return e
+    return None

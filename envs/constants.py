@@ -1,5 +1,11 @@
 import os
 from collections import namedtuple
+import sys
+import os
+
+sys.path.append(os.path.abspath(os.path.join(os.path.dirname(__file__), "../..")))
+
+from utils.pybullet_utils import *
 
 # ASSET DIRS
 ASSETS_DIR = os.path.join(os.path.join(os.path.dirname(__file__), os.pardir), "assets")
@@ -47,6 +53,26 @@ COLOR_FRANKA = [
 
 # Franka FR3 limits
 FRANKA_Limits = {
+    0: [-5.3093, 5.3093],
+    1: [-1.5133, 1.5133],
+    2: [-2.4937, 2.4937],
+    3: [-2.7478, -0.4461],
+    4: [-2.4800, 2.4800],
+    5: [0.8521, 4.2094],
+    6: [-5.7995, 5.7995],
+}
+
+PR2_Limits = {
+    74: [-3.141592653589793, 3.141592653589793],
+    75: [-3.141592653589793, 3.141592653589793],
+    76: [-3.141592653589793, 3.9],
+    78: [-3.141592653589793, 3.141592653589793],
+    79: [-3.141592653589793, 3.141592653589793],
+    81: [-3.141592653589793, 3.141592653589793],
+    82: [-3.141592653589793, 3.141592653589793],
+}
+
+KUKA_Limits = {
     0: [-5.3093, 5.3093],
     1: [-1.5133, 1.5133],
     2: [-2.4937, 2.4937],

@@ -2669,7 +2669,7 @@ def get_link_state(body, link, kinematics=True, velocity=True):
     # TODO: the defaults are set to False?
     # https://github.com/bulletphysics/bullet3/blob/master/examples/pybullet/pybullet.c
     return LinkState(*p.getLinkState(body, link,
-                                     # computeForwardKinematics=kinematics,
+                                     computeForwardKinematics=True,
                                      # computeLinkVelocity=velocity,
                                      physicsClientId=CLIENT))
 

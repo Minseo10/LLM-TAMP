@@ -32,10 +32,10 @@ from utils.pb_util import (
     set_point,
     get_pose,
     set_static,
-    add_data_path, DRAKE_IIWA_URDF,
+    add_data_path
 )
-from utils.tamp_util import Action, TAMPFeedback
-from envs.constants import ASSETS_DIR, COLOR_FRANKA, FRANKA_Limits, BROWN, TAN
+from utils.tamp_util import Action, TAMPFeedback, find_entry
+from envs.constants import ASSETS_DIR, COLOR_FRANKA, FRANKA_Limits, BROWN, TAN, PR2_Limits
 from utils.pybullet_utils import *
 from utils.pr2_utils import *
 logger = logging.getLogger(__name__)
@@ -44,8 +44,8 @@ logger = logging.getLogger(__name__)
 BOX_PATH = os.path.join(ASSETS_DIR, "box_obstacle3.obj")
 HOOK_PATH = os.path.join(ASSETS_DIR, "hook.obj")
 FRANKA_ROBOT_URDF = os.path.join(ASSETS_DIR, "franka_description", "robots", "panda_arm_hand.urdf")
-PR2_URDF = os.path.join(ASSETS_DIR, "pr2_description", "pr2.urdf")
-KUKA_URDF = os.path.join(ASSETS_DIR,"drake", "iiwa_description", "urdf", "iiwa14_polytype_collision.urdf")
+PR2_URDF = os.path.join(ASSETS_DIR, "pr2_description", "pr2_modified.urdf")
+KUKA_URDF = os.path.join(ASSETS_DIR,"drake", "iiwa_description", "urdf", "iiwa14_polytope_collision.urdf")
 
 class PybulletEnv:
     def __init__(self):
@@ -104,15 +104,15 @@ class PybulletEnv:
             return True
         return False
 
-    def step(self, action: Action, *args, **kwargs):
+    def step(self,json_path, prob_num, prob_idx, trial, action: Action, goal_list, domain_name:str, *args, **kwargs):
         # apply action
-        success, mp_feedback = self.apply_action(action, *args, **kwargs)
+        success, mp_feedback = self.apply_action(domain_name, action, *args, **kwargs)
 
         # get observation
-        observation = self.get_observation()
+        observation = self.get_observation(json_path, prob_num, prob_idx, trial, domain_name)
 
         # check goal
-        goal_achieved, goal_feedback = self.check_goal()
+        goal_achieved, goal_feedback = self.check_goal(domain_name, goal_list)  # TODO
 
         # prepare feedback
         feedback = TAMPFeedback(
@@ -128,7 +128,7 @@ class PybulletEnv:
 
         return observation, feedback
 
-    def get_observation(self):
+    def get_observation(self, json_path, prob_num, prob_idx, trial, domain_name):
         # in this general function, we assume getting observations for every objects
         # cprint("here is in the observation function", "yellow")
         observation = {}
@@ -207,15 +207,9 @@ class PybulletEnv:
         self.theta_dict[name] = 0
 
     def bring_blocks(self, domain_name, json_path, prob_num, prob_idx, trial):
-        def _find_entry(meta, prob_num, prob_idx, trial):
-            for e in meta:
-                if e.get("num") == prob_num and e.get("index") == prob_idx and e.get("trial") == trial:
-                    return e
-            return None
-
         with open(json_path, "r", encoding="utf-8") as f:
             meta = json.load(f)
-        entry = _find_entry(meta, prob_num, prob_idx, trial)
+        entry = find_entry(meta, prob_num, prob_idx, trial)
 
         if not entry or "objects" not in entry:
             print(f"[bring_blocks] No entry/objects for (num={prob_num}, idx={prob_idx}, trial={trial})")
@@ -279,19 +273,31 @@ class PyBulletRobot:
             self.robot = load_pybullet(FRANKA_ROBOT_URDF, fixed_base=True)
             tool_link = "tool_link"
             self.ik_joints = get_movable_joints(self.robot)
+            self.joint_limits = FRANKA_Limits
         elif domain_name == "blocksworld_pr":
             self.robot = load_pybullet(PR2_URDF, fixed_base=True)
             tool_link = "l_gripper_tool_frame"
+            # self.ik_joints = get_movable_joints(self.robot)
             self.ik_joints = joints_from_names(self.robot, PR2_GROUPS['left_arm'])
+            print("moveable joints: ", get_movable_joints(self.robot))
+            self.joint_limits = get_all_joint_limits(self.robot, self.ik_joints)
+            # self.joint_limits = PR2_Limits
+
         elif domain_name == "kitchen":
-            self.robot = load_pybullet(DRAKE_IIWA_URDF, fixed_base=True)
+            self.robot = load_pybullet(KUKA_URDF, fixed_base=True)
             tool_link = 'iiwa_link_ee_kuka'
             self.ik_joints = get_movable_joints(self.robot)
+            self.joint_limits = get_all_joint_limits(self.robot, self.ik_joints)
+
+        print("joint limits:", self.joint_limits)
+
         # assign_link_colors(self.robot, colors=COLOR_FRANKA)
         self.tool_attach_link = link_from_name(self.robot, tool_link)
 
         # set static: important that the robot is static during planning
         set_static(self.robot)
+
+        self.tcp_offset_tool = np.array([0.0, 0.0, 0.23])
 
         # grasping attachments & direction
         self.attachments_robot = []
@@ -321,7 +327,7 @@ class PyBulletRobot:
             }
         elif domain_name == "blocksworld_pr":
             self.position_offset_dict = {
-                "top": np.array([0.0, 0, 0.10]),
+                "top": np.array([0.0, 0, 0.04]),
                 "left": np.array([0.5, -0.15, 0]),
                 "right": np.array([0, 0.08, 0]),
                 "forward": np.array([-0.1, 0, 0]),
@@ -333,16 +339,22 @@ class PyBulletRobot:
             y_axis_positive = [-0.7068252, 0, 0, 0.7073883]
             z_axis_positive = [0, 0, 0, 1]
             z_axis_negative = [1, 0, 0, 0]
-            self.rotation_offset_dict = {
-                "top": z_axis_negative,
+            # [-0.7068252, 0.0, -0.7068252, 0.0]
+            # 0.4999998, 0.4999998, 0.4996018, 0.5003982
+            # -0.4999998, 0.4999998, -0.4996018, 0.5003982
+
+            self.rotation_offset_dict = {  # TODO
+                "top": x_axis_positive,
                 "left": y_axis_positive,
                 "right": y_axis_negative,
                 "forward": x_axis_positive,
                 "backward": x_axis_negative,
             }
+            self.pregrasp_offset = 0.10
+            self.lift_offset = 0.15
         elif domain_name == "kitchen":
             self.position_offset_dict = {
-                "top": np.array([0.0, 0, 0.20]),
+                "top": np.array([0.0, 0, 0.05]),
                 "left": np.array([0.5, -0.15, 0]),
                 "right": np.array([0, 0.08, 0]),
                 "forward": np.array([-0.1, 0, 0]),
@@ -355,30 +367,43 @@ class PyBulletRobot:
             z_axis_positive = [0, 0, 0, 1]
             z_axis_negative = [1, 0, 0, 0]
             self.rotation_offset_dict = {
-                "top": x_axis_negative,  # TODO
+                "top": z_axis_negative,  # TODO
                 "left": y_axis_positive,
                 "right": y_axis_negative,
                 "forward": x_axis_positive,
                 "backward": x_axis_negative,
             }
+            self.pregrasp_offset = 0.15
+            self.lift_offset = 0.15
 
         # initialize pose
         self.initialize_pose(domain_name)
+
+        ee_pose = get_link_pose(self.robot, self.tool_attach_link)
+        print("tool attach link:", self.tool_attach_link)
+        print("current ee pose:", ee_pose)
 
     def initialize_pose(self,domain_name="packing"):
         if domain_name == "packing":
             home_conf = [0, -0.785398163397, 0, -2.35619449, 0, 1.57079632679, 0.78539816, 0.04, 0.04]
             set_joint_positions(self.robot, self.ik_joints, home_conf)
         elif domain_name == "blocksworld_pr":
+            set_joint_positions(self.robot, joints_from_names(self.robot, PR2_GROUPS['base']), [0.0, 0.0 ,0.0])
             set_joint_positions(self.robot, joints_from_names(self.robot, PR2_GROUPS['left_arm']), TOP_HOLDING_LEFT_ARM)
-            set_joint_positions(self.robot, joints_from_names(self.robot, PR2_GROUPS['right_arm']),
-                                rightarm_from_leftarm(REST_LEFT_ARM))
+            set_joint_positions(self.robot, joints_from_names(self.robot, PR2_GROUPS['left_gripper']), [0.54, 0.54, 0.54, 0.54])
+
+            set_joint_positions(self.robot, joints_from_names(self.robot, PR2_GROUPS['right_arm']), REST_RIGHT_ARM)
             set_joint_positions(self.robot, joints_from_names(self.robot, PR2_GROUPS['torso']), [0.24])
         elif domain_name == "kitchen":
             home_conf = [0, 0, 0, 0, 0, 0, 0]
             set_joint_positions(self.robot, self.ik_joints, home_conf)
 
-    def pick(self, object, obstacles, grasp_direction, traj=None, play_traj=True):
+    def _tool_target_from_tcp(self, p_tcp_world, quat_tool_world):
+        R_tool = Rotation.from_quat(quat_tool_world).as_matrix()
+        p_tool = np.asarray(p_tcp_world) - R_tool @ self.tcp_offset_tool
+        return p_tool, quat_tool_world
+
+    def pick(self, domain_name, object, obstacles, grasp_direction, traj=None, play_traj=True):
         assert grasp_direction in self.position_offset_dict.keys(), "Unknown grasp direction!"
         if len(self.attachments_robot) > 0:
             self.release_gripper()
@@ -388,15 +413,31 @@ class PyBulletRobot:
         ee_grasp_position = box_position + self.position_offset_dict[grasp_direction]
         ee_grasp_orientation = self.rotation_offset_dict[grasp_direction]
 
+        # pre grasp
+        ee_pre_pos = (np.asarray(ee_grasp_position) + self.pregrasp_offset * np.asarray([0, 0, 1])).tolist()
+        ee_pre_ori = ee_grasp_orientation
+
+        # lift
+        ee_lift_pos = (np.asarray(ee_grasp_position) + self.lift_offset * np.asarray([0, 0, 1])).tolist()
+        ee_lift_ori = ee_grasp_orientation
+
+        print("Picking")
+        print(f"position of {object}: {box_position}, orientation of {object}: {box_orientation}")
+        print(f"ee_grasp_position of {ee_grasp_position}", f"ee_grasp_orientation of {ee_grasp_orientation}")
+        print("obstacles:", obstacles)
+        print("attachments_robot:", self.attachments_robot)
+        print("current conf:", current_conf)
+
         if traj is None:
             success, traj, feedback = self.motion_planning(
+                domain_name,
                 self.robot,
                 self.ik_joints,
                 ee_grasp_position,
                 ee_grasp_orientation,
                 obstacles,
                 self.attachments_robot,
-                FRANKA_Limits,
+                self.joint_limits,
             )
         else:
             assert (
@@ -433,7 +474,7 @@ class PyBulletRobot:
 
         return success, traj, feedback
 
-    def place(self, object, obstacles, x, y, z, theta, traj=None, play_traj=True):
+    def place(self, domain_name, object, obstacles, x, y, z, theta, traj=None, play_traj=True):
         assert len(self.attachments_robot) > 0, "No object attached!"
 
         current_conf = get_joint_positions(self.robot, self.ik_joints)
@@ -448,20 +489,30 @@ class PyBulletRobot:
         quat = rot.as_quat()
 
         position_offset = self.position_offset_dict[self.last_grasp_direction]
-        ee_grasp_position = new_box_position + position_offset
+        if domain_name == "packing":
+            ee_grasp_position = new_box_position + position_offset
+        if domain_name == "blocksworld_pr":
+            ee_grasp_position = new_box_position + position_offset - np.array([0.0, 0, 0.03])
+        if domain_name == "kitchen":
+            ee_grasp_position = new_box_position + position_offset
+        ee_grasp_orientation = self.rotation_offset_dict[self.last_grasp_direction]
+        # ee_grasp_orientation = quat
 
-        # rotation_offset = self.rotation_offset_dict[self.last_grasp_direction]
-        ee_grasp_orientation = quat
+        print("Placing")
+        print(f"ee_place_position of {ee_grasp_position}", f"ee_place_orientation of {ee_grasp_orientation}")
+        print("attachments_robot:", self.attachments_robot)
+        print("current conf:", current_conf)
 
         if traj is None:
             success, traj, feedback = self.motion_planning(
+                domain_name,
                 self.robot,
                 self.ik_joints,
                 ee_grasp_position,
                 ee_grasp_orientation,
                 obstacles,
                 self.attachments_robot,
-                FRANKA_Limits,
+                self.joint_limits,
             )
         else:
             assert (
@@ -473,7 +524,7 @@ class PyBulletRobot:
 
         # release gripper
         if success:
-            ee_link_from_tcp = Pose(point=(0, 0.00, 0.05))
+            ee_link_from_tcp = Pose(point=(0, 0.00, 0.00))
             # simulate action
             self.simulate_traj(
                 self.robot,
@@ -497,11 +548,19 @@ class PyBulletRobot:
 
     def verify_ik(self, targeted_pos, targeted_ori, joint_conf):
         original_conf = get_joint_positions(self.robot, self.ik_joints)
+        print("self.ik_joints: ", self.ik_joints)
+        print("joint_conf:", joint_conf)
         set_joint_positions(self.robot, self.ik_joints, joint_conf)
         pos, ori = get_link_pose(self.robot, self.tool_attach_link)
 
         dist = get_distance(pos, targeted_pos)
         ori_dist = quat_angle_between(ori, targeted_ori)
+        print("targeted_pos: ", targeted_pos)
+        print("targeted_ori: ", targeted_ori)
+        print("calculated pos:", pos)
+        print("calculated ori:", ori)
+        print("dist:", dist)
+        print("ori_dist:", ori_dist)
 
         set_joint_positions(self.robot, self.ik_joints, original_conf)
 
@@ -514,6 +573,7 @@ class PyBulletRobot:
 
     def motion_planning(
         self,
+        domain_name,
         robot,
         ik_joints,
         robot_ee_position,
@@ -524,15 +584,33 @@ class PyBulletRobot:
         diagnosis=False,
     ):
         # test ik first
-        end_conf = p.calculateInverseKinematics(
-            bodyUniqueId=self.robot,
-            endEffectorLinkIndex=self.tool_attach_link,
-            targetPosition=robot_ee_position,
-            targetOrientation=robot_end_orientation,
-            # currentPosition=[0, -0.785398163397, 0, -2.35619449, 0, 1.57079632679, 0.78539816, 0.01, 0.01],
-            maxNumIterations=100000,
-            residualThreshold=0.0001,
-        )
+        # end_conf = p.calculateInverseKinematics(
+        #     bodyUniqueId=self.robot,
+        #     endEffectorLinkIndex=self.tool_attach_link,
+        #     targetPosition=robot_ee_position,
+        #     targetOrientation=robot_end_orientation,
+        #     # currentPosition=[0, -0.785398163397, 0, -2.35619449, 0, 1.57079632679, 0.78539816, 0.01, 0.01],
+        #     maxNumIterations=100000,
+        #     residualThreshold=0.0001,
+        # )
+        start_conf_snapshot = get_joint_positions(self.robot, self.ik_joints)
+
+        if domain_name == 'blocksworld_pr':
+            end_conf = pr2_ik(robot, 'left', [robot_ee_position, robot_end_orientation], custom_limits)
+        elif domain_name == 'kitchen':
+            end_conf = inverse_kinematics(robot, self.tool_attach_link, [robot_ee_position, robot_end_orientation])
+        print("end_conf: ", end_conf)
+
+
+        # ik_joints_idx = [0, 1, 2, 6,
+        #                  7, 8, 9, 10, 11, 12, 13, 14, 15, 16, 17, 18, 22, 23,
+        #                  50, 52, 53, 54, 56, 57, 59, 60, 65, 66, 67, 68, 69, 70, 71,
+        #                  74, 75, 76, 78, 79, 81, 82, 87, 88, 89, 90, 91, 92, 93, 96]
+        #
+        # index_to_position = {joint: i for i, joint in enumerate(ik_joints_idx)}
+        # target_joints = [74, 75, 76, 78, 79, 81, 82]
+        # filtered_conf = tuple(end_conf[index_to_position[j]] for j in target_joints)
+        # print("calculated left arm ik: ", filtered_conf)
 
         ik_found = self.verify_ik(robot_ee_position, robot_end_orientation, end_conf)
         if not ik_found:
@@ -552,6 +630,7 @@ class PyBulletRobot:
         if if_collision:
             logger.debug(feedback)
             return False, None, feedback
+        set_joint_positions(self.robot, self.ik_joints, start_conf_snapshot)
 
         # plan motion
         logger.debug(str(obstacles))
@@ -561,10 +640,13 @@ class PyBulletRobot:
             end_conf,
             obstacles=list(obstacles.keys()),
             attachments=attachments_robot,
-            self_collisions=True,
+            self_collisions=False,
             custom_limits=custom_limits,
             diagnosis=diagnosis,
         )
+        print("trajectory: ", path)
+        print("start of trajectory: ", path[0])
+        print("end of trajectory: ", path[-1])
 
         # process planned results
         if path is None:

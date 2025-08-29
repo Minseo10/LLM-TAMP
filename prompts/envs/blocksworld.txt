@@ -1,0 +1,29 @@
+The tabletop environment has a robot arm, and several blocks. The robot sits at (0, 0, 0.71), faces positive x-axis, while positive z-axis points up.
+
+The robot has the following primitive actions, where each primitive action can take a list of objects and parameters as input:
+1. pick([obj], {}): pick up obj, with no parameters.
+The robot picks up a block obj.
+Preconditions: the block must be clear on top (no other block stacked above it). If the block is on the table, then the table surface supports it; if the block is on another block, then that lower block supports it. The robot’s arm must be empty.
+Effects: the robot is holding obj, and the block is no longer on the table or on top of another block.
+
+2. place([obj], {"x": [0.35, 0.75], "y": [0.00, 0.65], "z": [0.78, 1.10], "theta": [-3.14, 3.14]}): place obj at location (x, y, z) with planar rotation theta, where x ranges (0.35, 0.75), y ranges (0.00, 0.65), z ranges (0.78, 1.10) and theta ranges (-3.14, 3.14).
+The robot places a block obj it is holding at a target location.
+Preconditions: The position must be clear (no other object at that position).
+Effects:
+- Placing on the table: the z-coordinate should be 0.78. After placing, the block becomes supported by the table, and its top becomes clear.
+- Placing on top of another block: the z-coordinate should be the table height (0.78) plus the full height of the lower blocks (0.08 each) (z=0.78 + 0.08 * # of blocks beneath). After placing, the block is supported by the lower block, the placed block’s top becomes clear, and the supporting block is no longer clear.
+- In both cases, after placement the robot’s arm becomes empty, and the robot is no longer holding the block.
+
+The table surface region is defined as:
+x ranges from 0.35 to 0.75, y ranges from 0.00 to 0.65, z ranges from 0.78 to 0.79
+
+The initial environment state is:
+{state}
+
+The goal is to stack the blocks in the new following order. Make sure each block is stably placed.
+{goal}
+
+Constraints:
+- Produce a valid sequence of grounded actions that transforms the initial state into a state satisfying the goals.
+- Each action must respect its preconditions and effects.
+- Try to optimize: minimize number of actions (no unnecessary moves).

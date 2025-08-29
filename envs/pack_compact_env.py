@@ -5,7 +5,7 @@ import numpy as np
 from envs.constants import COLOR_MAP
 from envs.pb_env import PybulletEnv
 from utils.io_util import load_json, dump_json
-from utils.tamp_util import Action, PrimitiveAction, Parameter
+from utils.tamp_util import Action, PrimitiveAction, Parameter, find_entry
 from utils.llm_util import textualize_array
 from utils.pybullet_utils import *
 
@@ -22,14 +22,15 @@ class PackCompactEnv(PybulletEnv):
     def __init__(self):
         super().__init__()
 
-        self._primitive_actions = {
+        self._primitive_actions = {  # TODO
             "pick": PrimitiveAction(name="pick", obj_arity=1),
             "place": PrimitiveAction(
                 name="place",
                 obj_arity=1,
                 parameters={
-                    "x": Parameter("x", lower_limit=0.0, upper_limit=1.4),
-                    "y": Parameter("y", lower_limit=-1.0, upper_limit=1.0),
+                    "x": Parameter("x", lower_limit=-0.75, upper_limit=0.75),
+                    "y": Parameter("y", lower_limit=-0.65, upper_limit=0.65),
+                    "z": Parameter("z", lower_limit=0.0, upper_limit=1.10),
                     "theta": Parameter("theta", lower_limit=-3.14, upper_limit=3.14),
                 },
             ),
@@ -51,8 +52,15 @@ class PackCompactEnv(PybulletEnv):
         if domain_name == "packing":
             self.create_basket(x=basket["x"], y=basket["y"], w=basket["w"], l=basket["l"])
         elif domain_name == "kitchen":
-            self.create_box("mystove", BLUE, x=0.5, y=0.0, z=0.025)
-            self.create_box("mysink", RED, x=-0.5, y=0.0, z=0.025)
+            self.create_customized_box("stove", BLUE, w=0.25, l=0.25, h=0.05, x=0.5, y=0.0, z=0.025)
+            self.create_customized_box("sink", RED, w=0.25, l=0.25, h=0.05, x=-0.5, y=0.0, z=0.025)
+            xs = [-0.15, 0.0, 0.15]  # fixed
+            ys = [-0.4, 0.4, -0.6, 0.6]
+            i = 1
+            for yy in ys:
+                for xx in xs:
+                    self.create_customized_box(f"distractor{i}", GREY, w=0.06, l=0.06, h=0.10, x=xx, y=yy, z=0.05)
+                    i += 1
 
         # create objects
         if domain_name == "packing":
@@ -74,10 +82,10 @@ class PackCompactEnv(PybulletEnv):
         # physical simulation
         self.simulate()
 
-        observation = self.get_observation(domain_name=domain_name)
+        observation = self.get_observation(json_path, prob_num, prob_idx, trial, domain_name)
         return observation
 
-    def apply_action(self, action: Action, play_traj: bool = False):
+    def apply_action(self, domain_name, action: Action, play_traj: bool = False):
         # sanity check
         if action is None:
             return False, "No action is given!"
@@ -100,7 +108,7 @@ class PackCompactEnv(PybulletEnv):
             obstacles = self.prepare_obstacles(obj_name_list=[obj_name], remove_mode=True)
 
             success, traj, mp_feedback = self.robot.pick(
-                object, obstacles, grasp_direction="top", traj=traj, play_traj=play_traj
+                domain_name, object, obstacles, grasp_direction="top", traj=traj, play_traj=play_traj
             )
             if success:
                 logger.debug("Picked!")
@@ -117,12 +125,13 @@ class PackCompactEnv(PybulletEnv):
             obstacles = self.prepare_obstacles(obj_name_list=[obj_name], remove_mode=True)
 
             success, traj, mp_feedback = self.robot.place(
+                domain_name,
                 object,
                 obstacles,
                 # randomly sample x,y for ablation study
                 x=action.param_args["x"],
                 y=action.param_args["y"],
-                z=0.05,
+                z=action.param_args["z"],
                 theta=action.param_args["theta"],
                 traj=traj,
                 play_traj=play_traj,
@@ -141,8 +150,35 @@ class PackCompactEnv(PybulletEnv):
 
         return success, mp_feedback
 
-    def get_observation(self, domain_name="packing"):
-        observation = super().get_observation()
+    def get_goal(self, json_path, prob_num, prob_idx, trial, domain_name):
+        import re
+        goal_list = []
+        goal_predicate = []
+        with open(json_path, "r", encoding="utf-8") as f:
+            meta = json.load(f)
+
+        if domain_name == "blocksworld_pr":
+            entry = find_entry(meta, prob_num, prob_idx, trial)
+            for obj, underobj in entry["goal_on"].items():
+                goal_list.append(f"{obj} should be on {underobj}")
+                goal_predicate.append([obj, underobj])
+
+        elif domain_name == "kitchen":
+            entry = find_entry(meta, prob_num, prob_idx, trial)
+            goal_raw = entry.get("goal_raw", "")
+            atoms = re.findall(r"\((\w+)\s+(\w+)\)", goal_raw)
+            for pred, arg in atoms:
+                goal_list.append(f"{arg} should be {pred}")
+                goal_predicate.append(arg)
+
+        goal_text = ", ".join(goal_list) + "."
+
+        print("goal_text:", goal_text)
+
+        return goal_text, goal_predicate
+
+    def get_observation(self, json_path, prob_num, prob_idx, trial, domain_name="packing"):
+        observation = super().get_observation(json_path, prob_num, prob_idx, trial, domain_name)
         # remove table & basket from observation
         if domain_name == "blocksworld_pr" or domain_name == "packing":
             observation.pop("table")
@@ -154,13 +190,13 @@ class PackCompactEnv(PybulletEnv):
             y_range = np.array([basket_obs["bb_min"][1], basket_obs["bb_max"][1]])
             basket_text = f"The basket has a rectangular shape, ranges {textualize_array(x_range)} along the x axis, and ranges {textualize_array(y_range)} along the y axis."
         if domain_name == "kitchen":
-            stove_obs = observation.pop("mystove")
+            stove_obs = observation.pop("stove")
             x_range = np.array([stove_obs["bb_min"][0], stove_obs["bb_max"][0]])
             y_range = np.array([stove_obs["bb_min"][1], stove_obs["bb_max"][1]])
             z_range = np.array([stove_obs["bb_min"][2], stove_obs["bb_max"][2]])
             stove_text = f"The stove has a rectangular shape, ranges {textualize_array(x_range)} along the x axis, and ranges {textualize_array(y_range)} along the y axis."
 
-            sink_obs = observation.pop("mysink")
+            sink_obs = observation.pop("sink")
             x_range = np.array([sink_obs["bb_min"][0], sink_obs["bb_max"][0]])
             y_range = np.array([sink_obs["bb_min"][1], sink_obs["bb_max"][1]])
             z_range = np.array([sink_obs["bb_min"][2], sink_obs["bb_max"][2]])
@@ -178,18 +214,36 @@ class PackCompactEnv(PybulletEnv):
 
         # predicate info
         predicate_list = []
-        for object_name in observation.keys():
-            if self.check_in_basket(object_name):
-                predicate_list.append(f"{object_name} is in basket")
-            else:
-                predicate_list.append(f"{object_name} is not in basket")
+        if domain_name == "packing":
+            for object_name in observation.keys():
+                if self.check_in_basket(object_name):
+                    predicate_list.append(f"{object_name} is in basket")
+                else:
+                    predicate_list.append(f"{object_name} is not in basket")
+        if domain_name == "kitchen":
+            for object_name in observation.keys():
+                if self.check_in_stove(object_name):
+                    predicate_list.append(f"{object_name} is on the stove")
+                elif self.check_in_sink(object_name):
+                    predicate_list.append(f"{object_name} is on the sink")
+                else:
+                    predicate_list.append(f"{object_name} is on the table")
+        if domain_name == "blocksworld_pr":
+            with open(json_path, "r", encoding="utf-8") as f:
+                meta = json.load(f)
+            entry = find_entry(meta, prob_num, prob_idx, trial)
 
+            for obj, underobj in entry["init_surfaces"].items():
+                predicate_list.append(f"{obj} is on {underobj}")
         predicate_text = ", ".join(predicate_list) + "."
 
         if domain_name == "packing":
             obs_text = basket_text + "\n" + boxes_text + "\n" + predicate_text
         elif domain_name == "kitchen":
             obs_text = sink_text + "\n" + stove_text + "\n"+ boxes_text + "\n" + predicate_text
+        elif domain_name == "blocksworld_pr":
+            obs_text = boxes_text + "\n" + predicate_text
+        # print("obs_text:", obs_text)
         return observation, obs_text
 
     def get_symbolic_plan(self):
@@ -217,14 +271,80 @@ class PackCompactEnv(PybulletEnv):
             return True
         return False
 
-    def check_goal(self):
+    def check_in_stove(self, obj_name, tol=0.02):
+        min_bb_basket, max_bb_basket = self.get_bb("stove")
+        min_bb_obj, max_bb_obj = self.get_bb(obj_name)
+
+        if (
+            min_bb_obj[0] > min_bb_basket[0] - tol
+            and max_bb_obj[0] < max_bb_basket[0] + tol
+            and min_bb_obj[1] > min_bb_basket[1] - tol
+            and max_bb_obj[1] < max_bb_basket[1] + tol
+        ):
+            return True
+        return False
+
+    def check_in_sink(self, obj_name, tol=0.02):
+        min_bb_basket, max_bb_basket = self.get_bb("sink")
+        min_bb_obj, max_bb_obj = self.get_bb(obj_name)
+
+        if (
+            min_bb_obj[0] > min_bb_basket[0] - tol
+            and max_bb_obj[0] < max_bb_basket[0] + tol
+            and min_bb_obj[1] > min_bb_basket[1] - tol
+            and max_bb_obj[1] < max_bb_basket[1] + tol
+        ):
+            return True
+        return False
+
+    def check_on(self, obj, underobj, tol=0.05):
+        min_bb_obj, max_bb_obj = self.get_bb(obj)
+
+        if underobj == 'table':
+            if (
+                    min_bb_obj[0] > 0.35 - tol
+                    and max_bb_obj[0] < 0.75 + tol
+                    and min_bb_obj[1] > -0.65 - tol
+                    and max_bb_obj[1] < 0.65 + tol
+                    and min_bb_obj[2] > 0.71 - tol
+            ):
+                return True
+            return False
+        else:
+            min_bb_underobj, max_bb_underobj = self.get_bb(underobj)
+            if (
+                    min_bb_obj[0] > min_bb_underobj[0] - tol
+                    and max_bb_obj[0] < max_bb_underobj[0] + tol
+                    and min_bb_obj[1] > min_bb_underobj[1] - tol
+                    and max_bb_obj[1] < max_bb_underobj[1] + tol
+                    and min_bb_obj[2] > max_bb_underobj[2] - tol
+                    and min_bb_obj[2] < max_bb_underobj[2] + tol
+            ):
+                return True
+            return False
+
+
+    def check_goal(self, domain_name, goal_list):  # TODO
         is_goal = True
         feedback = []
-        for obj_name in self.objects.keys():
-            if obj_name != "basket" and obj_name != "table":
-                if not self.check_in_basket(obj_name):
+        print("goal_list", goal_list)
+        if domain_name == "packing":
+            for obj_name in self.objects.keys():
+                if obj_name != "basket" and obj_name != "table":
+                    if not self.check_in_basket(obj_name):
+                        is_goal = False
+                        feedback.append(f"{obj_name} is not in basket")
+        if domain_name == "kitchen":
+            for obj_name in goal_list:
+                print("obj_name", obj_name)
+                if not self.check_in_stove(obj_name):
                     is_goal = False
-                    feedback.append(f"{obj_name} is not in basket")
+                    feedback.append(f"{obj_name} is not on the stove")
+        if domain_name == "blocksworld_pr":
+            for obj, underobj in goal_list:
+                if not self.check_on(obj, underobj):
+                    is_goal = False
+                    feedback.append(f"{obj} is not on {underobj}")
 
         return is_goal, ", ".join(feedback)
 

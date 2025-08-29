@@ -17,7 +17,7 @@ domain_name: blocksworld_pr
 # saved dir
 save_dir: experiments/blocksworld_pr/saved_runs/run_tamp/${now:%Y-%m-%d-%H-%M-%S}/${env.env_name}_${planner.planner_prompt_file}_${planner.with_mp_feedback}
 
-json_path: experiments/blocksworld_pr/problem/problems_meta.json
+json_path: /home/minseo/robot_ws/src/tamp_llm/experiments/blocksworld_pr/problem/problems_meta.json
 
 save_to_file: True
 overwrite_instances: False

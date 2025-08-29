@@ -17,7 +17,7 @@ from .pybullet_utils import multiply, get_link_pose, set_joint_position, set_joi
     movable_from_joints, quat_from_axis_angle, LockRenderer, Euler, get_links, get_link_name, \
     get_extend_fn, get_moving_links, link_pairs_collision, get_link_subtree, \
     clone_body, get_all_links, pairwise_collision, tform_point, get_camera_matrix, ray_from_pixel, pixel_from_ray, dimensions_from_camera_matrix, \
-    wrap_angle, TRANSPARENT, PI, OOBB, pixel_from_point, set_all_color, wait_if_gui
+    wrap_angle, TRANSPARENT, PI, OOBB, pixel_from_point, set_all_color, wait_if_gui, sub_inverse_kinematics
 
 # TODO: restrict number of pr2 rotations to prevent from wrapping too many times
 
@@ -93,7 +93,7 @@ TOOL_POSE = Pose(euler=Euler(pitch=np.pi/2)) # l_gripper_tool_frame (+x out of g
 PI = np.pi
 TOP_HOLDING_LEFT_ARM = [0.67717021, -0.34313199, 1.2, -1.46688405, 1.24223229, -1.95442826, 2.22254125]
 SIDE_HOLDING_LEFT_ARM = [0.39277395, 0.33330058, 0., -1.52238431, 2.72170996, -1.21946936, -2.98914779]
-REST_LEFT_ARM = [2.13539289, 1.29629967, 3.74999698, -0.15000005, 10000., -0.10000004, 10000.]
+REST_RIGHT_ARM = [-2.13539289, 1.29629967, 0, 0, 0., 0, 0.]
 WIDE_LEFT_ARM = [1.5806603449288885, -0.14239066980481405, 1.4484623937179126, -1.4851759349218694, 1.3911839347271555,
                  -1.6531320011389408, -2.978586584568441]
 CENTER_LEFT_ARM = [-0.07133691252641006, -0.052973836083405494, 1.5741805775919033, -1.4481146328076862,
@@ -657,6 +657,13 @@ def inverse_visibility(pr2, point, head_name=HEAD_LINK_NAME, head_joints=None,
         return None
     return head_conf
 
+def get_all_joint_limits(body, joints):
+    limits = {}
+    for jid in joints:
+        lower, upper = get_joint_limits(body, jid)
+        limits[jid] = [float(lower), float(upper)]
+    return limits
+
 def plan_scan_path(pr2, tilt=0):
     head_joints = joints_from_names(pr2, PR2_GROUPS['head'])
     start_conf = get_joint_positions(pr2, head_joints)
@@ -795,3 +802,11 @@ def create_gripper(robot, arm, visual=True):
     if not visual:
         set_all_color(robot, TRANSPARENT)
     return gripper
+
+def pr2_ik(robot, arm, approach_pose, custom_limits):
+    arm_link = get_gripper_link(robot, arm)
+    arm_joints = get_arm_joints(robot, arm)
+    approach_conf = sub_inverse_kinematics(robot, arm_joints[0], arm_link, approach_pose, custom_limits=custom_limits)
+    if approach_conf is None:
+        return None
+    return get_joint_positions(robot, arm_joints)

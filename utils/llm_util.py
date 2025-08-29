@@ -120,13 +120,13 @@ class GPT_Chat:
 
 class LLMBase(abc.ABC):
     def __init__(self, use_gpt_4: bool, *args, **kwargs):
-        engine = "gpt-4-0125-preview" if use_gpt_4 else "gpt-3.5-turbo"
+        engine = "gpt-4o" if use_gpt_4 else "gpt-3.5-turbo"
         self.llm_gpt = GPT_Chat(engine=engine)
 
     def prompt_llm(self, prompt: str, temperature: float = 0.0, force_json: bool = False):
         # feed prompt to llm
         logger.info("\n" + "#" * 50)
-        logger.info(f"Prompt:\n{prompt}")
+        # logger.info(f"Prompt:\n{prompt}")
         messages = [{"role": "user", "content": prompt}]
 
         conn_success, llm_output = self.llm_gpt.get_response(

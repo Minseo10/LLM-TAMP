@@ -10,7 +10,7 @@ from pybullet_planning.interfaces.debug_utils import add_line
 from pybullet_planning.interfaces.robots.joint import get_custom_limits, get_joint_positions,set_joint_positions
 from pybullet_planning.interfaces.robots.collision import get_collision_fn
 
-from pybullet_planning.motion_planners import birrt, lazy_prm
+from pybullet_planning.motion_planners import birrt, lazy_prm, rrt_connect
 
 #####################################
 

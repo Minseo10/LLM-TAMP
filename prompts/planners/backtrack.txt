@@ -11,7 +11,7 @@ Please generate output step-by-step, which includes:
 Please organize the output following the json format below:
 {
     "Reasoning": "My reasoning for the failure of last plan is ...",
-    "Full Plan": ["pick(['red_box'], {})", "place(['red_box'], {'x': 0.51, 'y': 0.02, 'theta': 0.00})", ...]
+    "Full Plan": ["pick(['red_box'], {})", "place(['red_box'], {'x': 0.51, 'y': 0.10, 'z': 0.10, 'theta': 0.00})", ...]
 }
 
 Your output in json is (please don't output ```json):

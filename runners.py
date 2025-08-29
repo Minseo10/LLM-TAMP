@@ -7,6 +7,7 @@ from planners.llm_tamp_planner import LLMTAMPPlanner
 from planners.random_param_sampler import RandomParamSampler
 
 from utils.io_util import mkdir, save_npz, dump_json
+import time
 
 logger = logging.getLogger(__name__)
 logger.setLevel(logging.DEBUG)
@@ -30,10 +31,17 @@ class TAMPRunner:
         self.json_path = cfg.json_path
         self.domain_name = cfg.domain_name
 
+        if self.domain_name == "packing":
+            env_desc_file = "pack_boxes.txt"
+        if self.domain_name == "blocksworld_pr":
+            env_desc_file = "blocksworld.txt"
+        if self.domain_name == "kitchen":
+            env_desc_file = "kitchen.txt"
+
         # planner
         self.planner = LLMTAMPPlanner(
             planner_prompt_file=self.planner_cfg.planner_prompt_file,
-            env_desc_file="pack_boxes.txt",
+            env_desc_file=env_desc_file,
             primitive_actions=self.primitive_actions,
             with_mp_feedback=self.planner_cfg.with_mp_feedback,
             trace_size=self.planner_cfg.trace_size,
@@ -55,9 +63,10 @@ class TAMPRunner:
         for _ in range(self.max_llm_calls):
             # reset environment
             obs, obs_text = self.env.reset(json_path=json_path, prob_num=prob_num, prob_idx=prob_idx, trial=trial, use_gui=self.use_gui, domain_name=domain_name)
+            goal_text, goal_predicate = self.env.get_goal(json_path=json_path, prob_num=prob_num, prob_idx=prob_idx, trial=trial, domain_name=domain_name)
             # propose plan with llm (symbolic plan only used when sampling parameters only)
             plan = self.planner.plan(
-                obs_text, last_feedback_list, symbolic_plan=self.env.get_symbolic_plan()
+                domain_name, prob_num, prob_idx, obs_text, goal_text, last_feedback_list, symbolic_plan=self.env.get_symbolic_plan()
             )
             last_feedback_list = []  # last feedback
             num_llm_calls += 1
@@ -81,8 +90,8 @@ class TAMPRunner:
                 if action.traj is None or len(action.traj) == 0:
                     num_mp_calls += 1
 
-                _, feedback = self.env.step(
-                    action, play_traj=self.play_traj
+                _, feedback = self.env.step(json_path, prob_num, prob_idx, trial,
+                    action, goal_predicate, domain_name=domain_name, play_traj=self.play_traj
                 )  # this step will also save traj in action
                 last_feedback_list.append((action, feedback))
 
@@ -119,7 +128,21 @@ class TAMPRunner:
 
         return episode_data
 
-    def run(self, prob_num_range=[3, 4, 5, 6], prob_idx_range=[1, 2, 3, 4, 5], trial_range=[1, 2,]):
+    def _append_csv_row(self, csv_path: Path, fieldnames, row: dict):
+        import csv
+        import os
+
+        csv_path.parent.mkdir(parents=True, exist_ok=True)
+        file_exists = csv_path.exists()
+        with open(csv_path, "a", newline="", encoding="utf-8") as f:
+            w = csv.DictWriter(f, fieldnames=fieldnames)
+            if not file_exists:
+                w.writeheader()
+            w.writerow({k: row.get(k, "") for k in fieldnames})
+            f.flush()
+            os.fsync(f.fileno())
+
+    def run(self, prob_num_range=[3, 4, 5, 6], prob_idx_range=[1, 2, 3, 4, 5], trial_range=[1, 2,], repeat=[1, 2, 3]):
         # task_instances = self.env.create_task_instances(
         #     self.env_cfg,
         #     self.env_cfg.task_instances,
@@ -132,49 +155,76 @@ class TAMPRunner:
         num_steps_list = []
         num_mp_calls_list = []
         num_llm_calls_list = []
+        results_csv = Path(f"/home/minseo/develop/LLM-TAMP/experiments/{self.domain_name}/summary.csv")
+        Path(results_csv).parent.mkdir(parents=True, exist_ok=True)
+        fieldnames = [
+            "prob_num", "prob_idx", "trial", "repeat",
+            "total_planning_time",
+            "success", "backtrack_count", "num_mp_calls", "timed_out", "sim_success", "error"
+        ]
+
         # for idx, task_config in task_instances.items():
         for prob_num in prob_num_range:
             for prob_idx in prob_idx_range:
                 for trial in trial_range:
-                    # reset planner
-                    self.planner.reset()
-                    episode_data = self.run_once(self.json_path, prob_num, prob_idx, trial, domain_name=self.domain_name)
+                    for repeat in repeat:
+                        # reset planner
+                        time_start = time.time()
+                        self.planner.reset()
+                        episode_data = self.run_once(self.json_path, prob_num, prob_idx, trial, domain_name=self.domain_name)
+                        time_end = time.time()
 
-                    goal_achieved = episode_data["goal_achieved"]
-                    num_llm_calls = episode_data["num_llm_calls"]
-                    num_mp_calls = episode_data["num_mp_calls"]
+                        goal_achieved = episode_data["goal_achieved"]
+                        num_llm_calls = episode_data["num_llm_calls"]
+                        num_mp_calls = episode_data["num_mp_calls"]
 
-                    logger.info(f"Goal achieved: {goal_achieved}")
-                    logger.info(f"Number of MP calls: {num_mp_calls}")
-                    logger.info(f"Number of LLM calls: {num_llm_calls}")
+                        logger.info(f"Goal achieved: {goal_achieved}")
+                        logger.info(f"Number of MP calls: {num_mp_calls}")
+                        logger.info(f"Number of LLM calls: {num_llm_calls}")
 
-                    goal_achieved_list.append(goal_achieved)
+                        goal_achieved_list.append(goal_achieved)
 
-                    if goal_achieved:
-                        num_steps_list.append(len(episode_data["tamp_plan"]))
-                    else:
-                        num_steps_list.append(-1)
-                    num_mp_calls_list.append(episode_data["num_mp_calls"])
-                    num_llm_calls_list.append(episode_data["num_llm_calls"])
+                        if goal_achieved:
+                            num_steps_list.append(len(episode_data["tamp_plan"]))
+                        else:
+                            num_steps_list.append(-1)
+                        num_mp_calls_list.append(episode_data["num_mp_calls"])
+                        num_llm_calls_list.append(episode_data["num_llm_calls"])
 
-                    if self.save_to_file:
-                        # save tamp_plan into npz
-                        save_episode_dir = self.save_dir / f"{idx}"
-                        mkdir(save_episode_dir)
-                        # import pdb
+                        if self.save_to_file:
+                            # save tamp_plan into npz
+                            save_episode_dir = self.save_dir / f"{prob_num}_{prob_idx}_{trial}_{repeat}"
+                            mkdir(save_episode_dir)
+                            # import pdb
 
-                        # pdb.set_trace()
-                        save_npz(episode_data, save_episode_dir / "result.npz")
+                            # pdb.set_trace()
+                            save_npz(episode_data, save_episode_dir / "result.npz")
 
-                        # save json every time
-                        json_data = {
-                            "success_rate": np.mean(goal_achieved_list),
-                            "goal_achieved": goal_achieved_list,
-                            "num_steps": num_steps_list,
-                            "num_mp_calls": num_mp_calls_list,
-                            "num_llm_calls": num_llm_calls_list,
-                        }
-                        dump_json(json_data, self.save_dir / "result.json")
+                            # save json every time
+                            json_data = {
+                                "success_rate": np.mean(goal_achieved_list),
+                                "goal_achieved": goal_achieved_list,
+                                "num_steps": num_steps_list,
+                                "num_mp_calls": num_mp_calls_list,
+                                "num_llm_calls": num_llm_calls_list,
+                            }
+                            dump_json(json_data, self.save_dir / "result.json")
+
+                            # save in csv
+                            res = {
+                                "prob_num": prob_num,
+                                "prob_idx": prob_idx,
+                                "trial": trial,
+                                "repeat": repeat,
+                                "total_planning_time": time_end - time_start,
+                                "success": bool(goal_achieved),
+                                "backtrack_count": num_llm_calls,
+                                "sim_success": None,
+                                "error": "",
+                            }
+
+                            self._append_csv_row(results_csv, fieldnames, res)
+
 
 
 class RandomSampleRunner(TAMPRunner):
