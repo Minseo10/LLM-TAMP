@@ -10,7 +10,7 @@ planner:
   trace_size: 5
 
 # max llm callls
-max_llm_calls: 10
+max_llm_calls: 3
 
 domain_name: kitchen
 

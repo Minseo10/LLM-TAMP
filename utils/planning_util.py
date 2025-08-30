@@ -274,6 +274,8 @@ def plan_joint_motion(body, joints, end_conf, obstacles=[], attachments=[],
     """
     print("Planning joint motion...")
     assert len(joints) == len(end_conf)
+    if (weights is None) and (resolutions is not None):
+        weights = np.reciprocal(resolutions)
     sample_fn = get_sample_fn(body, joints, custom_limits=custom_limits)
     distance_fn = get_distance_fn(body, joints, weights=weights)
     extend_fn = get_extend_fn(body, joints, resolutions=resolutions)
@@ -282,13 +284,14 @@ def plan_joint_motion(body, joints, end_conf, obstacles=[], attachments=[],
                                     custom_limits=custom_limits, max_distance=max_distance)
 
     start_conf = get_joint_positions(body, joints)    
-    birrt_res = birrt(start_conf, end_conf, distance_fn, sample_fn, extend_fn, collision_fn, **kwargs)
-    feedback = "" if birrt_res is not None else "Failed because no collision-free trajectory is found"
+    path = birrt(start_conf, end_conf, distance_fn, sample_fn, extend_fn, collision_fn, **kwargs)
+    # path = plan_lazy_prm(start_conf, end_conf, sample_fn, extend_fn, collision_fn)
+    feedback = "" if path is not None else "Failed because no collision-free trajectory is found"
 
     # set to start_conf
     set_joint_positions(body, joints, start_conf)
     
-    return birrt_res, feedback
+    return path, feedback
     # return plan_lazy_prm(start_conf, end_conf, sample_fn, extend_fn, collision_fn)                # better
 
 def plan_lazy_prm(start_conf, end_conf, sample_fn, extend_fn, collision_fn, **kwargs):

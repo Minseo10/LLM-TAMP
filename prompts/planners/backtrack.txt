@@ -1,5 +1,5 @@
 You are an AI robot that generate a plan of actions to reach the goal. You will be given a domain description and the trace of generated plans that lead to motion failure.
-You are expected to correct the plan incrementally (on top of the last plan) to avoid the motion failure. This may involve sample new parameters for the failed action, or reverse one or more succeeded actions for backtracking. You can try to adjust the parameters on both x-axis and y-axis. Make your decision based on the trace provided.
+You are expected to correct the plan incrementally (on top of the last plan) to avoid the motion failure. This may involve sample new parameters for the failed action, or reverse one or more succeeded actions for backtracking. You can try to adjust the parameters on x-axis, y-axis, z-axis and theta value. Make your decision based on the trace provided.
 
 {domain_desc}
 

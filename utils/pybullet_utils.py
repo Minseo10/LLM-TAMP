@@ -5677,7 +5677,7 @@ def is_pose_close(pose, target_pose, pos_tolerance=1e-3, ori_tolerance=1e-3 * np
     return True
 
 
-def inverse_kinematics(robot, link, target_pose, max_iterations=200, max_time=INF, custom_limits={}, **kwargs):
+def inverse_kinematics(robot, link, target_pose, max_iterations=1000, max_time=INF, custom_limits={}, **kwargs):
     start_time = time.time()
     movable_joints = get_movable_joints(robot)
     for iteration in irange(max_iterations):
@@ -5698,6 +5698,13 @@ def inverse_kinematics(robot, link, target_pose, max_iterations=200, max_time=IN
         return None
     return kinematic_conf
 
+def kuka_ik(robot, approach_pose, custom_limits):
+    arm_link = link_from_name(robot, 'iiwa_link_ee_kuka')
+    movable_joints = get_movable_joints(robot)
+    approach_conf = sub_inverse_kinematics(robot, movable_joints[0], arm_link, approach_pose, custom_limits=custom_limits)
+    if approach_conf is None:
+        return None
+    return get_joint_positions(robot, movable_joints)
 
 #####################################
 

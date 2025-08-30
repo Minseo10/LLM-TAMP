@@ -428,7 +428,7 @@ def get_collision_fn(body, joints, obstacles=[],
     lower_limits, upper_limits = get_custom_limits(body, joints, custom_limits)
 
     # TODO: maybe prune the link adjacent to the robot
-    def collision_fn(q, diagnosis=False):
+    def collision_fn(q, diagnosis=True):
         # * joint limit check
         msg = ""
         if not all_between(lower_limits, q, upper_limits):

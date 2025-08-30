@@ -2,17 +2,17 @@ The tabletop environment has a robot arm, a sink, a stove, 12 distractors and 6 
 DO NOT move the distractors/sink/stove. They are fixed objects. Only move the foods.
 
 The robot has the following primitive actions, where each primitive action can take a list of objects and parameters as input:
-1. pick([obj], {}): pick up obj, with no parameters.
+1. pick([obj], {"theta": [-3.14, 3.14]}): pick up obj, with planar rotation theta, where theta ranges (-3.14, 3.14).
 The robot picks up a block obj.
 Preconditions: The robot’s arm must be empty.
-Effects: the robot is holding obj, and the block is no longer on the table or on the sink/stove.
+Effects: the robot is holding obj, and the block is no longer on the table or on the sink/stove. Choose theta value among [0.0, 1.57, -1.57, -3.14].
 
 2.  place([obj], {"x": [-0.625, 0.625], "y": [0.00, 0.65], "z": [0.15, 0.16], "theta": [-3.14, 3.14]}): place obj at location (x, y, z) with planar rotation theta, where x ranges (-0.625, 0.625), y ranges (-0.65, 0.65), z ranges (0.15, 0.16) and theta ranges (-3.14, 3.14).
 The robot places a food obj it is holding at a target location.
 Preconditions: The position must be clear (no other object at that position).
 Effects:
-- Placing on the sink: When the food is placed on the sink, then the food is cleaned.
-- Placing on the stove: When the food is placed on the stove, then the food is cooked.
+- Placing on the sink: When the food is placed on the sink, then the food is cleaned. Choose theta value among [0.0, 1.57, -1.57, -3.14].
+- Placing on the stove: When the food is placed on the stove, then the food is cooked. Choose theta value among [0.0, 1.57, -1.57, -3.14]. When selecting the x, y position, ensure that no collisions occur with other objects already on the stove.
 - In both cases, after placement the robot’s arm becomes empty, and the robot is no longer holding the block.
 
 The initial environment state is:

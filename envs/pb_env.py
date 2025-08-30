@@ -35,7 +35,7 @@ from utils.pb_util import (
     add_data_path
 )
 from utils.tamp_util import Action, TAMPFeedback, find_entry
-from envs.constants import ASSETS_DIR, COLOR_FRANKA, FRANKA_Limits, BROWN, TAN, PR2_Limits
+from envs.constants import ASSETS_DIR, COLOR_FRANKA, FRANKA_Limits, BROWN, TAN, PR2_Limits, KUKA_Limits
 from utils.pybullet_utils import *
 from utils.pr2_utils import *
 logger = logging.getLogger(__name__)
@@ -287,7 +287,8 @@ class PyBulletRobot:
             self.robot = load_pybullet(KUKA_URDF, fixed_base=True)
             tool_link = 'iiwa_link_ee_kuka'
             self.ik_joints = get_movable_joints(self.robot)
-            self.joint_limits = get_all_joint_limits(self.robot, self.ik_joints)
+            # self.joint_limits = get_all_joint_limits(self.robot, self.ik_joints)
+            self.joint_limits = KUKA_Limits
 
         print("joint limits:", self.joint_limits)
 
@@ -373,8 +374,8 @@ class PyBulletRobot:
                 "forward": x_axis_positive,
                 "backward": x_axis_negative,
             }
-            self.pregrasp_offset = 0.15
-            self.lift_offset = 0.15
+            self.pregrasp_offset = 0.10
+            self.lift_offset = 0.10
 
         # initialize pose
         self.initialize_pose(domain_name)
@@ -403,7 +404,78 @@ class PyBulletRobot:
         p_tool = np.asarray(p_tcp_world) - R_tool @ self.tcp_offset_tool
         return p_tool, quat_tool_world
 
-    def pick(self, domain_name, object, obstacles, grasp_direction, traj=None, play_traj=True):
+    # def pick(self, domain_name, object, obstacles, grasp_direction, traj=None, play_traj=True):
+    #     assert grasp_direction in self.position_offset_dict.keys(), "Unknown grasp direction!"
+    #     if len(self.attachments_robot) > 0:
+    #         self.release_gripper()
+    #     # prepare grasping pose
+    #     current_conf = get_joint_positions(self.robot, self.ik_joints)
+    #     box_position, box_orientation = get_pose(object)
+    #     ee_grasp_position = box_position + self.position_offset_dict[grasp_direction]
+    #     ee_grasp_orientation = self.rotation_offset_dict[grasp_direction]
+    #
+    #     # pre grasp
+    #     ee_pre_pos = (np.asarray(ee_grasp_position) + self.pregrasp_offset * np.asarray([0, 0, 1])).tolist()
+    #     ee_pre_ori = ee_grasp_orientation
+    #
+    #     # lift
+    #     ee_lift_pos = (np.asarray(ee_grasp_position) + self.lift_offset * np.asarray([0, 0, 1])).tolist()
+    #     ee_lift_ori = ee_grasp_orientation
+    #
+    #     print("Picking")
+    #     print(f"position of {object}: {box_position}, orientation of {object}: {box_orientation}")
+    #     print(f"ee_grasp_position of {ee_grasp_position}", f"ee_grasp_orientation of {ee_grasp_orientation}")
+    #     print("obstacles:", obstacles)
+    #     print("attachments_robot:", self.attachments_robot)
+    #     print("current conf:", current_conf)
+    #
+    #     if traj is None:
+    #         success, traj, feedback = self.motion_planning(
+    #             domain_name,
+    #             self.robot,
+    #             self.ik_joints,
+    #             ee_grasp_position,
+    #             ee_grasp_orientation,
+    #             obstacles,
+    #             self.attachments_robot,
+    #             self.joint_limits,
+    #         )
+    #     else:
+    #         assert (
+    #             traj[0] == current_conf
+    #         ), f"The start conf of the known trajectory {traj[0]} is not the same as the robot start conf {current_conf}"
+    #
+    #         success = True
+    #         feedback = "Success"
+    #
+    #     # update attachments
+    #     if success:
+    #         # simulate action
+    #         ee_link_from_tcp = Pose(point=(0, 0.00, 0.0))
+    #         self.simulate_traj(
+    #             self.robot,
+    #             self.ik_joints,
+    #             self.attachments_robot,
+    #             None,
+    #             self.tool_attach_link,
+    #             ee_link_from_tcp,
+    #             traj,
+    #             play_traj,
+    #         )
+    #
+    #         lifted_position = [box_position[0], box_position[1], box_position[2] + 0.01]
+    #         set_point(object, lifted_position)
+    #         box_attach = create_attachment(self.robot, self.tool_attach_link, object)
+    #         box_attach.assign()
+    #         self.attachments_robot.append(box_attach)
+    #         logger.debug(f"box_position: {box_position}")
+    #
+    #         # set last grasp direction
+    #         self.last_grasp_direction = grasp_direction
+    #
+    #     return success, traj, feedback
+
+    def pick(self, domain_name, object, obstacles, theta, grasp_direction, traj=None, play_traj=True):
         assert grasp_direction in self.position_offset_dict.keys(), "Unknown grasp direction!"
         if len(self.attachments_robot) > 0:
             self.release_gripper()
@@ -411,7 +483,14 @@ class PyBulletRobot:
         current_conf = get_joint_positions(self.robot, self.ik_joints)
         box_position, box_orientation = get_pose(object)
         ee_grasp_position = box_position + self.position_offset_dict[grasp_direction]
-        ee_grasp_orientation = self.rotation_offset_dict[grasp_direction]
+        # ee_grasp_orientation = self.rotation_offset_dict[grasp_direction]
+
+        if domain_name == "kitchen":
+            rot = Rotation.from_euler("XYZ", [np.pi, 0, theta], degrees=False)
+        elif domain_name == "blocksworld_pr":
+            rot = Rotation.from_euler("XYZ", [theta, np.pi/2, 0], degrees=False)
+        quat = rot.as_quat()
+        ee_grasp_orientation = quat
 
         # pre grasp
         ee_pre_pos = (np.asarray(ee_grasp_position) + self.pregrasp_offset * np.asarray([0, 0, 1])).tolist()
@@ -423,13 +502,35 @@ class PyBulletRobot:
 
         print("Picking")
         print(f"position of {object}: {box_position}, orientation of {object}: {box_orientation}")
-        print(f"ee_grasp_position of {ee_grasp_position}", f"ee_grasp_orientation of {ee_grasp_orientation}")
         print("obstacles:", obstacles)
         print("attachments_robot:", self.attachments_robot)
         print("current conf:", current_conf)
 
         if traj is None:
-            success, traj, feedback = self.motion_planning(
+            # ---- 1) PRE-GRASP: current -> pre-grasp ----
+            print("MOVING TO PRE GRASP")
+            print(f"ee_pre_pos of {ee_pre_pos}", f"ee_pre_ori of {ee_pre_ori}")
+
+            ok1, path1, fb1 = self.motion_planning(
+                domain_name,
+                self.robot,
+                self.ik_joints,
+                ee_pre_pos,
+                ee_pre_ori,
+                obstacles,
+                self.attachments_robot,
+                self.joint_limits,
+            )
+            if not ok1:
+                return False, None, f"Failed to reach pre-grasp: {fb1}"
+
+            set_joint_positions(self.robot, self.ik_joints, path1[-1])
+
+            # ---- 2) GRASP: pre-grasp -> grasp ----
+            print("MOVE CLOSER")
+            print(f"ee_grasp_position of {ee_grasp_position}", f"ee_grasp_orientation of {ee_grasp_orientation}")
+
+            ok2, path2, fb2 = self.motion_planning(
                 domain_name,
                 self.robot,
                 self.ik_joints,
@@ -439,17 +540,79 @@ class PyBulletRobot:
                 self.attachments_robot,
                 self.joint_limits,
             )
-        else:
-            assert (
-                traj[0] == current_conf
-            ), f"The start conf of the known trajectory {traj[0]} is not the same as the robot start conf {current_conf}"
+            if not ok2:
+                set_joint_positions(self.robot, self.ik_joints, current_conf)
+                return False, None, f"Failed to reach grasp: {fb2}"
 
+            ee_link_from_tcp = Pose(point=(0, 0.00, 0.0))
+            path_12 = list(path1) + list(path2)[1:]
+            self.simulate_traj(
+                self.robot,
+                self.ik_joints,
+                self.attachments_robot,
+                None,
+                self.tool_attach_link,
+                ee_link_from_tcp,
+                path_12,
+                play_traj,
+            )
+
+            # ---- 3) ATTACH ----
+            print("ATTACH OBJECT")
+            lifted_position = [box_position[0], box_position[1], box_position[2] + 0.01]
+            set_point(object, lifted_position)
+            box_attach = create_attachment(self.robot, self.tool_attach_link, object)
+            box_attach.assign()
+            self.attachments_robot.append(box_attach)
+            logger.debug(f"box_position: {box_position}")
+
+            # set last grasp direction
+            self.last_grasp_direction = grasp_direction
+
+            set_joint_positions(self.robot, self.ik_joints, path_12[-1])
+
+            # ---- 4) LIFT: grasp -> lift ----
+            print("LIFT")
+            print(f"ee_lift_pos of {ee_lift_pos}", f"ee_lift_ori of {ee_lift_ori}")
+            only_stove_sink = {k: v for k, v in obstacles.items() if v in ["stove", "sink"]}
+            print("obstacles:", only_stove_sink)
+            ok3, path3, fb3 = self.motion_planning(
+                domain_name,
+                self.robot,
+                self.ik_joints,
+                ee_lift_pos,
+                ee_lift_ori,
+                obstacles,
+                self.attachments_robot,
+                self.joint_limits,
+            )
+            if not ok3:
+                self.release_gripper()
+                set_joint_positions(self.robot, self.ik_joints, current_conf)
+                return False, None, f"Failed to lift after grasp: {fb3}"
+
+            self.simulate_traj(
+                self.robot,
+                self.ik_joints,
+                self.attachments_robot,
+                object,
+                self.tool_attach_link,
+                ee_link_from_tcp,
+                path3,
+                play_traj,
+            )
+
+            traj = path_12 + list(path3)[1:]
             success = True
             feedback = "Success"
 
-        # update attachments
-        if success:
-            # simulate action
+        else:
+            assert (
+                    traj[0] == current_conf
+            ), f"The start conf of the known trajectory {traj[0]} is not the same as the robot start conf {current_conf}"
+            success = True
+            feedback = "Success"
+
             ee_link_from_tcp = Pose(point=(0, 0.00, 0.0))
             self.simulate_traj(
                 self.robot,
@@ -468,64 +631,215 @@ class PyBulletRobot:
             box_attach.assign()
             self.attachments_robot.append(box_attach)
             logger.debug(f"box_position: {box_position}")
-
-            # set last grasp direction
             self.last_grasp_direction = grasp_direction
 
         return success, traj, feedback
 
+    # def place(self, domain_name, object, obstacles, x, y, z, theta, traj=None, play_traj=True):
+    #     assert len(self.attachments_robot) > 0, "No object attached!"
+    #
+    #     current_conf = get_joint_positions(self.robot, self.ik_joints)
+    #     box_position, box_orientation = get_pose(object)
+    #     logger.debug(f"box_position: {box_position}")
+    #     logger.debug(f"box_orientation: {box_orientation}")
+    #
+    #     new_box_position = (x, y, z)
+    #     # new_box_orientation = box_orientation
+    #
+    #     rot = Rotation.from_euler("XYZ", [np.pi, 0, theta], degrees=False)
+    #     quat = rot.as_quat()
+    #
+    #     position_offset = self.position_offset_dict[self.last_grasp_direction]
+    #     if domain_name == "packing":
+    #         ee_grasp_position = new_box_position + position_offset
+    #     if domain_name == "blocksworld_pr":
+    #         ee_grasp_position = new_box_position + position_offset - np.array([0.0, 0, 0.03])
+    #     if domain_name == "kitchen":
+    #         ee_grasp_position = new_box_position + position_offset
+    #     ee_grasp_orientation = self.rotation_offset_dict[self.last_grasp_direction]
+    #     # ee_grasp_orientation = quat
+    #
+    #     print("Placing")
+    #     print(f"ee_place_position of {ee_grasp_position}", f"ee_place_orientation of {ee_grasp_orientation}")
+    #     print("attachments_robot:", self.attachments_robot)
+    #     print("current conf:", current_conf)
+    #
+    #     if traj is None:
+    #         success, traj, feedback = self.motion_planning(
+    #             domain_name,
+    #             self.robot,
+    #             self.ik_joints,
+    #             ee_grasp_position,
+    #             ee_grasp_orientation,
+    #             obstacles,
+    #             self.attachments_robot,
+    #             self.joint_limits,
+    #         )
+    #     else:
+    #         assert (
+    #             traj[0] == current_conf
+    #         ), f"The start conf of the known trajectory {traj[0]} is not the same as the robot start conf {current_conf}"
+    #
+    #         success = True
+    #         feedback = "Success"
+    #
+    #     # release gripper
+    #     if success:
+    #         ee_link_from_tcp = Pose(point=(0, 0.00, 0.00))
+    #         # simulate action
+    #         self.simulate_traj(
+    #             self.robot,
+    #             self.ik_joints,
+    #             self.attachments_robot,
+    #             object,
+    #             self.tool_attach_link,
+    #             ee_link_from_tcp,
+    #             traj,
+    #             play_traj,
+    #         )
+    #
+    #         self.release_gripper()
+    #         logger.debug(f"Placed object {object}!")
+    #
+    #     return success, traj, feedback
+
     def place(self, domain_name, object, obstacles, x, y, z, theta, traj=None, play_traj=True):
         assert len(self.attachments_robot) > 0, "No object attached!"
 
+        # --- current state & target spec ---
         current_conf = get_joint_positions(self.robot, self.ik_joints)
         box_position, box_orientation = get_pose(object)
         logger.debug(f"box_position: {box_position}")
         logger.debug(f"box_orientation: {box_orientation}")
 
-        new_box_position = (x, y, z)
-        # new_box_orientation = box_orientation
-
-        rot = Rotation.from_euler("XYZ", [np.pi, 0, theta], degrees=False)
+        new_box_position = np.array([x, y, z], dtype=float)
+        if domain_name == "kitchen":
+            rot = Rotation.from_euler("XYZ", [np.pi, 0, theta], degrees=False)
+        elif domain_name == "blocksworld_pr":
+            rot = Rotation.from_euler("XYZ", [theta, np.pi/2, 0], degrees=False)
         quat = rot.as_quat()
 
         position_offset = self.position_offset_dict[self.last_grasp_direction]
         if domain_name == "packing":
-            ee_grasp_position = new_box_position + position_offset
-        if domain_name == "blocksworld_pr":
-            ee_grasp_position = new_box_position + position_offset - np.array([0.0, 0, 0.03])
-        if domain_name == "kitchen":
-            ee_grasp_position = new_box_position + position_offset
-        ee_grasp_orientation = self.rotation_offset_dict[self.last_grasp_direction]
-        # ee_grasp_orientation = quat
+            ee_place_pos = new_box_position + position_offset
+        elif domain_name == "blocksworld_pr":
+            ee_place_pos = new_box_position + position_offset - np.array([0.0, 0.0, 0.03])
+        elif domain_name == "kitchen":
+            ee_place_pos = new_box_position #+ position_offset
+
+        # ee_place_ori = self.rotation_offset_dict[self.last_grasp_direction]
+        ee_place_ori = quat
+
+        # --- pre-place & lift (retreat) ---
+        # pre grasp
+        ee_pre_pos = (np.asarray(ee_place_pos) + self.pregrasp_offset * np.asarray([0, 0, 1])).tolist()
+        ee_pre_ori = ee_place_ori
+
+        # lift
+        ee_lift_pos = (np.asarray(ee_place_pos) + self.lift_offset * np.asarray([0, 0, 1])).tolist()
+        ee_lift_ori = ee_place_ori
 
         print("Placing")
-        print(f"ee_place_position of {ee_grasp_position}", f"ee_place_orientation of {ee_grasp_orientation}")
+        print(f"ee_pre_position: {ee_pre_pos}, ee_pre_orientation: {ee_pre_ori}")
+        print(f"ee_place_position: {ee_place_pos}, ee_place_orientation: {ee_place_ori}")
         print("attachments_robot:", self.attachments_robot)
         print("current conf:", current_conf)
 
+        ee_link_from_tcp = Pose(point=(0, 0.00, 0.00))
+
         if traj is None:
-            success, traj, feedback = self.motion_planning(
+            # ---- 1) PRE-PLACE: current -> pre-place ----
+            print("MOVE TO PRE PLACE POSE")
+            ok1, path1, fb1 = self.motion_planning(
                 domain_name,
                 self.robot,
                 self.ik_joints,
-                ee_grasp_position,
-                ee_grasp_orientation,
+                ee_pre_pos,
+                ee_pre_ori,
                 obstacles,
                 self.attachments_robot,
                 self.joint_limits,
             )
-        else:
-            assert (
-                traj[0] == current_conf
-            ), f"The start conf of the known trajectory {traj[0]} is not the same as the robot start conf {current_conf}"
+            if not ok1:
+                return False, None, f"Failed to reach pre-place: {fb1}"
 
+            set_joint_positions(self.robot, self.ik_joints, path1[-1])
+
+            # ---- 2) PLACE: pre-place -> place ----
+            print("MOVE CLOSER")
+            ok2, path2, fb2 = self.motion_planning(
+                domain_name,
+                self.robot,
+                self.ik_joints,
+                ee_place_pos,
+                ee_place_ori,
+                obstacles,
+                self.attachments_robot,
+                self.joint_limits,
+            )
+            if not ok2:
+                # 복구
+                set_joint_positions(self.robot, self.ik_joints, current_conf)
+                return False, None, f"Failed to reach place pose: {fb2}"
+
+            path_12 = list(path1) + list(path2)[1:]
+            self.simulate_traj(
+                self.robot,
+                self.ik_joints,
+                self.attachments_robot,
+                object,
+                self.tool_attach_link,
+                ee_link_from_tcp,
+                path_12,
+                play_traj,
+            )
+
+            # ---- 3) RELEASE ----
+            print("RELEASE GRIPPER")
+            self.release_gripper()
+            logger.debug(f"Placed object {object}!")
+
+            set_joint_positions(self.robot, self.ik_joints, path_12[-1])
+
+            # ---- 4) LIFT (RETREAT): place -> lift ----
+            print("LIFT")
+            ok3, path3, fb3 = self.motion_planning(
+                domain_name,
+                self.robot,
+                self.ik_joints,
+                ee_lift_pos,
+                ee_lift_ori,
+                obstacles,
+                self.attachments_robot,
+                self.joint_limits,
+            )
+            if not ok3:
+                return True, path_12, f"Placed, but failed to retreat: {fb3}"
+
+            self.simulate_traj(
+                self.robot,
+                self.ik_joints,
+                self.attachments_robot,
+                None,
+                self.tool_attach_link,
+                ee_link_from_tcp,
+                path3,
+                play_traj,
+            )
+
+            # 전체 경로
+            traj = path_12 + list(path3)[1:]
             success = True
             feedback = "Success"
 
-        # release gripper
-        if success:
-            ee_link_from_tcp = Pose(point=(0, 0.00, 0.00))
-            # simulate action
+        else:
+            assert (
+                    traj[0] == current_conf
+            ), f"The start conf of the known trajectory {traj[0]} is not the same as the robot start conf {current_conf}"
+            success = True
+            feedback = "Success"
+
+            # simulate known traj with attachment, then release
             self.simulate_traj(
                 self.robot,
                 self.ik_joints,
@@ -536,7 +850,6 @@ class PyBulletRobot:
                 traj,
                 play_traj,
             )
-
             self.release_gripper()
             logger.debug(f"Placed object {object}!")
 
@@ -547,6 +860,8 @@ class PyBulletRobot:
         self.last_grasp_direction = None
 
     def verify_ik(self, targeted_pos, targeted_ori, joint_conf):
+        if joint_conf is None:
+            return False
         original_conf = get_joint_positions(self.robot, self.ik_joints)
         print("self.ik_joints: ", self.ik_joints)
         print("joint_conf:", joint_conf)
@@ -555,12 +870,12 @@ class PyBulletRobot:
 
         dist = get_distance(pos, targeted_pos)
         ori_dist = quat_angle_between(ori, targeted_ori)
-        print("targeted_pos: ", targeted_pos)
-        print("targeted_ori: ", targeted_ori)
-        print("calculated pos:", pos)
-        print("calculated ori:", ori)
-        print("dist:", dist)
-        print("ori_dist:", ori_dist)
+        # print("targeted_pos: ", targeted_pos)
+        # print("targeted_ori: ", targeted_ori)
+        # print("calculated pos:", pos)
+        # print("calculated ori:", ori)
+        # print("dist:", dist)
+        # print("ori_dist:", ori_dist)
 
         set_joint_positions(self.robot, self.ik_joints, original_conf)
 
@@ -598,8 +913,10 @@ class PyBulletRobot:
         if domain_name == 'blocksworld_pr':
             end_conf = pr2_ik(robot, 'left', [robot_ee_position, robot_end_orientation], custom_limits)
         elif domain_name == 'kitchen':
-            end_conf = inverse_kinematics(robot, self.tool_attach_link, [robot_ee_position, robot_end_orientation])
+            # end_conf = inverse_kinematics(robot, self.tool_attach_link, [robot_ee_position, robot_end_orientation])
+            end_conf = kuka_ik(robot, [robot_ee_position, robot_end_orientation], custom_limits)
         print("end_conf: ", end_conf)
+        print("attachments:", attachments_robot)
 
 
         # ik_joints_idx = [0, 1, 2, 6,
@@ -644,9 +961,9 @@ class PyBulletRobot:
             custom_limits=custom_limits,
             diagnosis=diagnosis,
         )
-        print("trajectory: ", path)
-        print("start of trajectory: ", path[0])
-        print("end of trajectory: ", path[-1])
+        # print("trajectory: ", path)
+        # print("start of trajectory: ", path[0])
+        # print("end of trajectory: ", path[-1])
 
         # process planned results
         if path is None:
