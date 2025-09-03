@@ -106,13 +106,13 @@ class PybulletEnv:
 
     def step(self,json_path, prob_num, prob_idx, trial, action: Action, goal_list, domain_name:str, *args, **kwargs):
         # apply action
-        success, mp_feedback = self.apply_action(domain_name, action, *args, **kwargs)
+        success, mp_feedback = self.apply_action(domain_name, action, *args, **kwargs) # TODO 여기서 TAMP Plan 같이 리턴
 
         # get observation
         observation = self.get_observation(json_path, prob_num, prob_idx, trial, domain_name)
 
         # check goal
-        goal_achieved, goal_feedback = self.check_goal(domain_name, goal_list)  # TODO
+        goal_achieved, goal_feedback = self.check_goal(domain_name, goal_list)
 
         # prepare feedback
         feedback = TAMPFeedback(
@@ -487,8 +487,10 @@ class PyBulletRobot:
 
         if domain_name == "kitchen":
             rot = Rotation.from_euler("XYZ", [np.pi, 0, theta], degrees=False)
+            default_conf = (0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
         elif domain_name == "blocksworld_pr":
             rot = Rotation.from_euler("XYZ", [theta, np.pi/2, 0], degrees=False)
+            default_conf = TOP_HOLDING_LEFT_ARM
         quat = rot.as_quat()
         ee_grasp_orientation = quat
 
@@ -524,7 +526,17 @@ class PyBulletRobot:
             if not ok1:
                 return False, None, f"Failed to reach pre-grasp: {fb1}"
 
-            set_joint_positions(self.robot, self.ik_joints, path1[-1])
+            ee_link_from_tcp = Pose(point=(0, 0.00, 0.0))
+            self.simulate_traj(
+                self.robot,
+                self.ik_joints,
+                self.attachments_robot,
+                None,
+                self.tool_attach_link,
+                ee_link_from_tcp,
+                path1,
+                play_traj,
+            )
 
             # ---- 2) GRASP: pre-grasp -> grasp ----
             print("MOVE CLOSER")
@@ -544,8 +556,6 @@ class PyBulletRobot:
                 set_joint_positions(self.robot, self.ik_joints, current_conf)
                 return False, None, f"Failed to reach grasp: {fb2}"
 
-            ee_link_from_tcp = Pose(point=(0, 0.00, 0.0))
-            path_12 = list(path1) + list(path2)[1:]
             self.simulate_traj(
                 self.robot,
                 self.ik_joints,
@@ -553,7 +563,7 @@ class PyBulletRobot:
                 None,
                 self.tool_attach_link,
                 ee_link_from_tcp,
-                path_12,
+                path2,
                 play_traj,
             )
 
@@ -566,10 +576,13 @@ class PyBulletRobot:
             self.attachments_robot.append(box_attach)
             logger.debug(f"box_position: {box_position}")
 
+            for _ in range(3):
+                p.stepSimulation()
+
             # set last grasp direction
             self.last_grasp_direction = grasp_direction
 
-            set_joint_positions(self.robot, self.ik_joints, path_12[-1])
+            # set_joint_positions(self.robot, self.ik_joints, path2[-1])
 
             # ---- 4) LIFT: grasp -> lift ----
             print("LIFT")
@@ -602,14 +615,41 @@ class PyBulletRobot:
                 play_traj,
             )
 
-            traj = path_12 + list(path3)[1:]
+            print("MOVE THE DEFAULT POSE")
+            path4, fb4 = plan_joint_motion(
+                self.robot,
+                self.ik_joints,
+                default_conf,
+                obstacles=list(obstacles.keys()),
+                attachments=self.attachments_robot,
+                self_collisions=False,
+                custom_limits=self.joint_limits,
+                diagnosis=False,
+            )
+            if path4 is None:
+                logger.debug(fb4)
+                set_joint_positions(self.robot, self.ik_joints, current_conf)
+                return False, None, f"Failed to move to rest pose after grasp: {fb4}"
+
+            self.simulate_traj(
+                self.robot,
+                self.ik_joints,
+                self.attachments_robot,
+                object,
+                self.tool_attach_link,
+                ee_link_from_tcp,
+                path4,
+                play_traj,
+            )
+
+            traj = [path1, path2, path3, path4]
             success = True
             feedback = "Success"
 
         else:
             assert (
-                    traj[0] == current_conf
-            ), f"The start conf of the known trajectory {traj[0]} is not the same as the robot start conf {current_conf}"
+                    traj[0][0] == current_conf
+            ), f"The start conf of the known trajectory {traj[0][0]} is not the same as the robot start conf {current_conf}"
             success = True
             feedback = "Success"
 
@@ -621,7 +661,18 @@ class PyBulletRobot:
                 None,
                 self.tool_attach_link,
                 ee_link_from_tcp,
-                traj,
+                traj[0],
+                play_traj,
+            )
+
+            self.simulate_traj(
+                self.robot,
+                self.ik_joints,
+                self.attachments_robot,
+                None,
+                self.tool_attach_link,
+                ee_link_from_tcp,
+                traj[1],
                 play_traj,
             )
 
@@ -633,6 +684,27 @@ class PyBulletRobot:
             logger.debug(f"box_position: {box_position}")
             self.last_grasp_direction = grasp_direction
 
+            self.simulate_traj(
+                self.robot,
+                self.ik_joints,
+                self.attachments_robot,
+                object,
+                self.tool_attach_link,
+                ee_link_from_tcp,
+                traj[2],
+                play_traj,
+            )
+
+            self.simulate_traj(
+                self.robot,
+                self.ik_joints,
+                self.attachments_robot,
+                object,
+                self.tool_attach_link,
+                ee_link_from_tcp,
+                traj[3],
+                play_traj,
+            )
         return success, traj, feedback
 
     # def place(self, domain_name, object, obstacles, x, y, z, theta, traj=None, play_traj=True):
@@ -715,8 +787,10 @@ class PyBulletRobot:
         new_box_position = np.array([x, y, z], dtype=float)
         if domain_name == "kitchen":
             rot = Rotation.from_euler("XYZ", [np.pi, 0, theta], degrees=False)
+            default_conf = (0.0, 0.0, 0.0, 0.0, 0.0, 0.0, 0.0)
         elif domain_name == "blocksworld_pr":
             rot = Rotation.from_euler("XYZ", [theta, np.pi/2, 0], degrees=False)
+            default_conf = TOP_HOLDING_LEFT_ARM
         quat = rot.as_quat()
 
         position_offset = self.position_offset_dict[self.last_grasp_direction]
@@ -725,7 +799,7 @@ class PyBulletRobot:
         elif domain_name == "blocksworld_pr":
             ee_place_pos = new_box_position + position_offset - np.array([0.0, 0.0, 0.03])
         elif domain_name == "kitchen":
-            ee_place_pos = new_box_position #+ position_offset
+            ee_place_pos = new_box_position - np.array([0.0, 0.0, 0.03]) #+ position_offset
 
         # ee_place_ori = self.rotation_offset_dict[self.last_grasp_direction]
         ee_place_ori = quat
@@ -763,26 +837,7 @@ class PyBulletRobot:
             if not ok1:
                 return False, None, f"Failed to reach pre-place: {fb1}"
 
-            set_joint_positions(self.robot, self.ik_joints, path1[-1])
-
-            # ---- 2) PLACE: pre-place -> place ----
-            print("MOVE CLOSER")
-            ok2, path2, fb2 = self.motion_planning(
-                domain_name,
-                self.robot,
-                self.ik_joints,
-                ee_place_pos,
-                ee_place_ori,
-                obstacles,
-                self.attachments_robot,
-                self.joint_limits,
-            )
-            if not ok2:
-                # 복구
-                set_joint_positions(self.robot, self.ik_joints, current_conf)
-                return False, None, f"Failed to reach place pose: {fb2}"
-
-            path_12 = list(path1) + list(path2)[1:]
+            # set_joint_positions(self.robot, self.ik_joints, path1[-1])
             self.simulate_traj(
                 self.robot,
                 self.ik_joints,
@@ -790,7 +845,38 @@ class PyBulletRobot:
                 object,
                 self.tool_attach_link,
                 ee_link_from_tcp,
-                path_12,
+                path1,
+                play_traj,
+            )
+
+            # ---- 2) PLACE: pre-place -> place ----
+            if domain_name == "kitchen":
+                filtered = {k: v for k, v in obstacles.items() if v not in ["stove", "sink"]}
+            else:
+                filtered = obstacles
+            print("MOVE CLOSER")
+            ok2, path2, fb2 = self.motion_planning(
+                domain_name,
+                self.robot,
+                self.ik_joints,
+                ee_place_pos,
+                ee_place_ori,
+                filtered,
+                self.attachments_robot,
+                self.joint_limits,
+            )
+            if not ok2:
+                set_joint_positions(self.robot, self.ik_joints, current_conf)
+                return False, None, f"Failed to reach place pose: {fb2}"
+
+            self.simulate_traj(
+                self.robot,
+                self.ik_joints,
+                self.attachments_robot,
+                object,
+                self.tool_attach_link,
+                ee_link_from_tcp,
+                path2,
                 play_traj,
             )
 
@@ -798,8 +884,10 @@ class PyBulletRobot:
             print("RELEASE GRIPPER")
             self.release_gripper()
             logger.debug(f"Placed object {object}!")
+            for _ in range(3):
+                p.stepSimulation()
 
-            set_joint_positions(self.robot, self.ik_joints, path_12[-1])
+            # set_joint_positions(self.robot, self.ik_joints, path_12[-1])
 
             # ---- 4) LIFT (RETREAT): place -> lift ----
             print("LIFT")
@@ -814,7 +902,7 @@ class PyBulletRobot:
                 self.joint_limits,
             )
             if not ok3:
-                return True, path_12, f"Placed, but failed to retreat: {fb3}"
+                return False, None, f"Failed to retreat: {fb3}"
 
             self.simulate_traj(
                 self.robot,
@@ -827,15 +915,42 @@ class PyBulletRobot:
                 play_traj,
             )
 
+            print("MOVE THE DEFAULT POSE")
+            path4, fb4 = plan_joint_motion(
+                self.robot,
+                self.ik_joints,
+                default_conf,
+                obstacles=list(obstacles.keys()),
+                attachments=self.attachments_robot,
+                self_collisions=False,
+                custom_limits=self.joint_limits,
+                diagnosis=False,
+            )
+            if path4 is None:
+                logger.debug(fb4)
+                set_joint_positions(self.robot, self.ik_joints, current_conf)
+                return False, None, f"Failed to move to rest pose after grasp: {fb4}"
+
+            self.simulate_traj(
+                self.robot,
+                self.ik_joints,
+                self.attachments_robot,
+                None,
+                self.tool_attach_link,
+                ee_link_from_tcp,
+                path4,
+                play_traj,
+            )
+
             # 전체 경로
-            traj = path_12 + list(path3)[1:]
+            traj = [path1, path2, path3, path4]
             success = True
             feedback = "Success"
 
         else:
             assert (
-                    traj[0] == current_conf
-            ), f"The start conf of the known trajectory {traj[0]} is not the same as the robot start conf {current_conf}"
+                    traj[0][0] == current_conf
+            ), f"The start conf of the known trajectory {traj[0][0]} is not the same as the robot start conf {current_conf}"
             success = True
             feedback = "Success"
 
@@ -847,11 +962,41 @@ class PyBulletRobot:
                 object,
                 self.tool_attach_link,
                 ee_link_from_tcp,
-                traj,
+                traj[0],
+                play_traj,
+            )
+            self.simulate_traj(
+                self.robot,
+                self.ik_joints,
+                self.attachments_robot,
+                object,
+                self.tool_attach_link,
+                ee_link_from_tcp,
+                traj[1],
                 play_traj,
             )
             self.release_gripper()
             logger.debug(f"Placed object {object}!")
+            self.simulate_traj(
+                self.robot,
+                self.ik_joints,
+                self.attachments_robot,
+                None,
+                self.tool_attach_link,
+                ee_link_from_tcp,
+                traj[2],
+                play_traj,
+            )
+            self.simulate_traj(
+                self.robot,
+                self.ik_joints,
+                self.attachments_robot,
+                None,
+                self.tool_attach_link,
+                ee_link_from_tcp,
+                traj[3],
+                play_traj,
+            )
 
         return success, traj, feedback
 

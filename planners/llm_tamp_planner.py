@@ -123,6 +123,7 @@ class LLMTAMPPlanner(BasePlanner, LLMBase):
 
         # plan
         planning_prompt = self._prepare_planning_prompt(obs_text, goal_text, feedback_text, domain, problem, symbolic_plan)
+        print(planning_prompt)
 
         plan_iter = 0
         plan, reasoning = None, None

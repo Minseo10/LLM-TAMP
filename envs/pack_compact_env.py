@@ -59,13 +59,13 @@ class PackCompactEnv(PybulletEnv):
         elif domain_name == "kitchen":
             self.create_customized_box("stove", BLUE, w=0.25, l=0.25, h=0.05, x=0.5, y=0.0, z=0.025)
             self.create_customized_box("sink", RED, w=0.25, l=0.25, h=0.05, x=-0.5, y=0.0, z=0.025)
-            # xs = [-0.15, 0.0, 0.15]  # fixed
-            # ys = [-0.4, 0.4, -0.6, 0.6]
-            # i = 1
-            # for yy in ys:
-            #     for xx in xs:
-            #         self.create_customized_box(f"distractor{i}", GREY, w=0.06, l=0.06, h=0.10, x=xx, y=yy, z=0.05)
-            #         i += 1
+            xs = [-0.15, 0.0, 0.15]  # fixed
+            ys = [-0.4, 0.4, -0.6, 0.6]
+            i = 1
+            for yy in ys:
+                for xx in xs:
+                    self.create_customized_box(f"distractor{i}", GREY, w=0.06, l=0.06, h=0.10, x=xx, y=yy, z=0.05)
+                    i += 1
 
         # create objects
         if domain_name == "packing":
@@ -114,7 +114,7 @@ class PackCompactEnv(PybulletEnv):
 
             success, traj, mp_feedback = self.robot.pick(
                 domain_name, object, obstacles, theta=action.param_args["theta"], grasp_direction="top", traj=traj, play_traj=play_traj
-            )
+            ) # TODO 여기서 tamp plan (trajectory와 gripper attach/release action) return
             if success:
                 logger.debug("Picked!")
             else:
@@ -129,7 +129,7 @@ class PackCompactEnv(PybulletEnv):
             # prepare obstacles (avoid all other objects)
             obstacles = self.prepare_obstacles(obj_name_list=[obj_name], remove_mode=True)
 
-            success, traj, mp_feedback = self.robot.place(
+            success, traj, mp_feedback = self.robot.place( # TODO 여기서 tamp plan (trajectory와 gripper attach/release action) return
                 domain_name,
                 object,
                 obstacles,

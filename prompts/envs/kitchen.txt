@@ -7,7 +7,7 @@ The robot picks up a block obj.
 Preconditions: The robot’s arm must be empty.
 Effects: the robot is holding obj, and the block is no longer on the table or on the sink/stove. Choose theta value among [0.0, 1.57, -1.57, -3.14].
 
-2.  place([obj], {"x": [-0.625, 0.625], "y": [0.00, 0.65], "z": [0.15, 0.16], "theta": [-3.14, 3.14]}): place obj at location (x, y, z) with planar rotation theta, where x ranges (-0.625, 0.625), y ranges (-0.65, 0.65), z ranges (0.15, 0.16) and theta ranges (-3.14, 3.14).
+2.  place([obj], {"x": [-0.65, 0.65], "y": [-0.125, 0.125], "z": [0.15, 0.16], "theta": [-3.14, 3.14]}): place obj at location (x, y, z) with planar rotation theta, where x ranges (-0.65, 0.65), y ranges (-0.125, 0.125), z ranges (0.15, 0.16) and theta ranges (-3.14, 3.14).
 The robot places a food obj it is holding at a target location.
 Preconditions: The position must be clear (no other object at that position).
 Effects:

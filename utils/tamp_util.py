@@ -103,3 +103,47 @@ def find_entry(meta, prob_num, prob_idx, trial):
         if e.get("num") == prob_num and e.get("index") == prob_idx and e.get("trial") == trial:
             return e
     return None
+
+# utils/plan_log_util.py (신규 파일; import 해서 사용)
+import pybullet as p
+
+def joints_to_names(body, joints):
+    names = []
+    for j in joints:
+        info = p.getJointInfo(body, j)
+        names.append(info[1].decode('utf-8'))
+    return names
+
+def make_conf_entry(body, joints, joint_names, values):
+    return {
+        "type": "conf",
+        "body": int(body),
+        "joints": list(map(int, joints)),
+        "joint_names": list(joint_names),
+        "values": list(map(float, values)),
+    }
+
+def make_trajectory_entry(body, joints, joint_names, path):
+    return {
+        "type": "Trajectory",
+        "path": [
+            make_conf_entry(body, joints, joint_names, q)
+            for q in path
+        ]
+    }
+
+def make_attach_entry(arm_side, child_body):
+    return {
+        "type": "Attach",
+        "arm": arm_side,
+        "left": (arm_side == "left"),
+        "body": int(child_body),
+    }
+
+def make_detach_entry(arm_side, child_body):
+    return {
+        "type": "Detach",
+        "arm": arm_side,
+        "left": (arm_side == "left"),
+        "body": int(child_body),
+    }
