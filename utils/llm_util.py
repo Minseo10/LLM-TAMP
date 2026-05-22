@@ -60,7 +60,7 @@ class GPT_Chat:
 
         # add key
         self.client = OpenAI(
-            api_key=OPENAI_KEYS["key"],
+            api_key=OPENAI_KEYS["OPENAI_API_KEY"],
             organization=OPENAI_KEYS["org"],
             timeout=60,
             max_retries=5,

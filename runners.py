@@ -52,87 +52,13 @@ class TAMPRunner:
         self.play_traj = cfg.play_traj
         self.use_gui = cfg.use_gui
 
-        self.use_hard_timeout = getattr(cfg, "use_hard_timeout", False)
-        self.timeout_sec = getattr(cfg, "timeout_sec", 600)
+        self.use_hard_timeout = cfg.use_hard_timeout
+        self.timeout_sec = cfg.timeout_sec
 
         logger.info(f"Run TAMP for setting {cfg.env.env_name}!")
 
-    # def run_once(self, json_path, prob_num, prob_idx, trial, domain_name):
-    #     # main loop
-    #     last_feedback_list = []
-    #     last_temp_tamp_plan = None
-    #     final_tamp_plan = None
-    #     num_mp_calls = 0
-    #     num_llm_calls = 0
-    #     for _ in range(self.max_llm_calls):
-    #         # reset environment
-    #         obs, obs_text = self.env.reset(json_path=json_path, prob_num=prob_num, prob_idx=prob_idx, trial=trial, use_gui=self.use_gui, domain_name=domain_name)
-    #         goal_text, goal_predicate = self.env.get_goal(json_path=json_path, prob_num=prob_num, prob_idx=prob_idx, trial=trial, domain_name=domain_name)
-    #         # propose plan with llm (symbolic plan only used when sampling parameters only)
-    #         plan = self.planner.plan(
-    #             domain_name, prob_num, prob_idx, obs_text, goal_text, last_feedback_list, symbolic_plan=self.env.get_symbolic_plan()
-    #         )
-    #         last_feedback_list = []  # last feedback
-    #         num_llm_calls += 1
-    #
-    #         # rollout
-    #         temp_tamp_plan = []
-    #         same_as_last = True
-    #         for action_i, action in enumerate(plan):
-    #             # if same as last, simulate last traj
-    #             if (
-    #                 same_as_last
-    #                 and last_temp_tamp_plan is not None
-    #                 and len(last_temp_tamp_plan) > action_i
-    #             ):
-    #                 if str(action) == str(last_temp_tamp_plan[action_i]):
-    #                     action = last_temp_tamp_plan[action_i]
-    #                 else:
-    #                     same_as_last = False
-    #
-    #             # motion planning when no traj
-    #             if action.traj is None or len(action.traj) == 0:
-    #                 num_mp_calls += 1
-    #
-    #             _, feedback = self.env.step(json_path, prob_num, prob_idx, trial,
-    #                 action, goal_predicate, domain_name=domain_name, play_traj=self.play_traj
-    #             )  # this step will also save traj in action
-    #             last_feedback_list.append((action, feedback))
-    #
-    #             logger.debug(f"Apply action: {action}")
-    #             logger.debug(f"Succeed: {feedback.action_success}")
-    #             logger.debug(f"MP feedback: {feedback.motion_planner_feedback}")
-    #
-    #             if feedback.action_success:
-    #                 temp_tamp_plan.append(action)
-    #             else:
-    #                 logger.info(f"Action {str(action)} failed!")
-    #                 break
-    #
-    #             if feedback.goal_achieved:
-    #                 final_tamp_plan = temp_tamp_plan
-    #                 break
-    #
-    #         last_temp_tamp_plan = temp_tamp_plan
-    #         if feedback.goal_achieved:
-    #             logger.info("Find full plan!")
-    #             break
-    #         else:
-    #             logger.info(f"Goal not achieved: {feedback.task_process_feedback}")
-    #
-    #     logger.info("Episode ends!")
-    #     self.env.destroy()
-    #
-    #     episode_data = {
-    #         "tamp_plan": final_tamp_plan,
-    #         "goal_achieved": feedback.goal_achieved,
-    #         "num_mp_calls": num_mp_calls,
-    #         "num_llm_calls": num_llm_calls,
-    #     }
-    #
-    #     return episode_data
 
-    def run_once(self, json_path, prob_num, prob_idx, trial, repeat, domain_name):
+    def run_one(self, json_path, prob_num, prob_idx, trial, repeat, domain_name):
         # main loop
         last_feedback_list = []
         last_temp_tamp_plan = None
@@ -153,7 +79,7 @@ class TAMPRunner:
         file_handler.setFormatter(formatter)
 
         logger.addHandler(file_handler)
-        logger.info(f"=== Start run_once | domain={domain_name}, prob={prob_num}, idx={prob_idx}, trial={trial} ===")
+        logger.info(f"=== Start run_one | domain={domain_name}, prob={prob_num}, idx={prob_idx}, trial={trial} ===")
 
         start_time = time.time()
         end_time = start_time
@@ -227,7 +153,6 @@ class TAMPRunner:
                         reached_goal = True
                         break
 
-                    # 타임아웃 체크 (긴 플랜에서 너무 오래 굴리지 않도록)
                     if (time.time() - start_time) >= timeout_sec:
                         end_time = time.time()
                         break
@@ -241,18 +166,17 @@ class TAMPRunner:
                     logger.info(
                         f"Goal not achieved: {feedback.task_process_feedback if 'feedback' in locals() else 'no feedback'}")
 
-                # 타임아웃 재확인
                 if (time.time() - start_time) >= timeout_sec:
                     end_time = time.time()
                     break
-        except Exception as e:  # [MOD]
+        except Exception as e:
             error_msg = repr(e)
-            logger.exception("Unhandled exception in run_once")
-        finally:  # [MOD]
+            logger.exception("Unhandled exception in run_one")
+        finally:
             end_time = time.time()
             logger.info("Episode ends!")
             self.env.destroy()
-            logger.info(f"=== End run_once | success={final_tamp_plan is not None}, "
+            logger.info(f"=== End run_one | success={final_tamp_plan is not None}, "
                         f"time={end_time - start_time:.2f}s, timed_out={timed_out} ===")
             logger.removeHandler(file_handler)
             file_handler.close()
@@ -271,28 +195,20 @@ class TAMPRunner:
 
         return episode_data
 
-    def _run_once_worker(self, q, json_path, prob_num, prob_idx, trial, repeat, domain_name):  # [MOD]
-        """
-        하드 타임아웃용 워커 프로세스 타겟.
-        결과는 Queue로 전달.
-        """
+    def run_one_worker(self, q, json_path, prob_num, prob_idx, trial, repeat, domain_name):  # [MOD]
         try:
-            res = self.run_once(json_path, prob_num, prob_idx, trial, repeat, domain_name)
+            res = self.run_one(json_path, prob_num, prob_idx, trial, repeat, domain_name)
             q.put(("ok", res))
         except Exception as e:
             q.put(("err", repr(e)))
 
-    def run_once_hard_timeout(self, json_path, prob_num, prob_idx, trial, repeat, domain_name,
-                              timeout_sec=None):  # [MOD]
-        """
-        multiprocessing.Process를 사용한 하드 타임아웃 버전.
-        timeout_sec 이 지나면 프로세스를 terminate.
-        """
+    def run_one_hard_timeout(self, json_path, prob_num, prob_idx, trial, repeat, domain_name,
+                              timeout_sec=None):
         if timeout_sec is None:
             timeout_sec = self.timeout_sec
 
         q = mp.Queue()
-        p = mp.Process(target=self._run_once_worker,
+        p = mp.Process(target=self.run_one_worker,
                        args=(q, json_path, prob_num, prob_idx, trial, repeat, domain_name))
         start = time.time()
         p.start()
@@ -304,26 +220,25 @@ class TAMPRunner:
                 "planning_time": 0,
                 "num_mp_calls": 0,
                 "num_llm_calls": 0,
-                "timed_out": False,  # [MOD]
-                "error": "",  # [MOD]
+                "timed_out": False,
+                "error": "",
         }
 
         if p.is_alive():
-            # 타임아웃: 프로세스 강제 종료
-            print(f"[TIMEOUT] Killing run (>{600}s).")
-            p.terminate()
+            print(f"[TIMEOUT] Killing run (>{timeout_sec}s).")
+            p.kill()
             p.join()
             elapsed = time.time() - start
-            # 최소 episode_data 형태로 반환
-            return res.update({
+            res.update({
                 "tamp_plan": None,
                 "goal_achieved": False,
                 "planning_time": elapsed,
                 "num_mp_calls": 0,
                 "num_llm_calls": 0,
-                "timed_out": True,  # [MOD]
-                "error": "",  # [MOD]
+                "timed_out": True,
+                "error": "",
             })
+            return res
         else:
             try:
                 status, payload = q.get_nowait()
@@ -342,8 +257,9 @@ class TAMPRunner:
                     "planning_time": time.time() - start,
                     "error": f"no result from child: {e}",
                 })
+            return res
 
-    def _append_csv_row(self, csv_path: Path, fieldnames, row: dict):
+    def append_csv_row(self, csv_path: Path, fieldnames, row: dict):
         import csv
         import os
 
@@ -386,12 +302,12 @@ class TAMPRunner:
                         # reset planner
                         self.planner.reset()
                         if self.use_hard_timeout:
-                            episode_data = self.run_once_hard_timeout(
+                            episode_data = self.run_one_hard_timeout(
                                 self.json_path, prob_num, prob_idx, trial, repeat, domain_name=self.domain_name,
                                 timeout_sec=self.timeout_sec
                             )
                         else:
-                            episode_data = self.run_once(
+                            episode_data = self.run_one(
                                 self.json_path, prob_num, prob_idx, trial, repeat, domain_name=self.domain_name
                             )
 
@@ -447,14 +363,13 @@ class TAMPRunner:
                                 "total_planning_time": planning_time,
                                 "success": bool(goal_achieved),
                                 "num_llm_calls": num_llm_calls,
-                                "num_mp_calls": num_mp_calls,  # [MOD] 누락 보완
+                                "num_mp_calls": num_mp_calls,
                                 "timed_out": bool(timed_out),
                                 "sim_success": None,
                                 "error": error_msg,
                             }
 
-                            self._append_csv_row(results_csv, fieldnames, res)
-
+                            self.append_csv_row(results_csv, fieldnames, res)
 
 
 class RandomSampleRunner(TAMPRunner):
@@ -481,7 +396,7 @@ class RandomSampleRunner(TAMPRunner):
 
         logger.info(f"Run parameter sampling for setting {cfg.env.env_name}!")
 
-    def run_once(self, task_config):
+    def run_one(self, task_config):
         # main loop
         last_temp_tamp_plan = None
         final_tamp_plan = None
@@ -575,7 +490,7 @@ class RandomSampleRunner(TAMPRunner):
         num_mp_calls_list = []
         num_sample_iters_list = []
         for idx, task_config in task_instances.items():
-            episode_data = self.run_once(task_config)
+            episode_data = self.run_one(task_config)
 
             goal_achieved = episode_data["goal_achieved"]
             num_sample_iters = episode_data["num_sample_iters"]

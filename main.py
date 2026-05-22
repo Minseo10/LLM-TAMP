@@ -29,7 +29,6 @@ def main(cfg: DictConfig):
     runner_cls = RUNNER[cfg.runner]
     runner = runner_cls(cfg)
     runner.run(prob_num_range=cfg.prob_num, prob_idx_range=cfg.prob_idx, trial_range=cfg.trial, repeat_range=cfg.repeat)
-    # runner.run(prob_num_range=[4,], prob_idx_range=[1,], trial_range=[1,])
 
 
 if __name__ == "__main__":
