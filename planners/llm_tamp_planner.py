@@ -21,11 +21,12 @@ class LLMTAMPPlanner(BasePlanner, LLMBase):
         primitive_actions: Dict[str, PrimitiveAction],
         with_mp_feedback: bool = True,
         trace_size: int = 3,
+        llm_model: str = "gpt-4o",
         *args,
         **kwargs,
     ):
         BasePlanner.__init__(self, primitive_actions=primitive_actions, *args, **kwargs)
-        LLMBase.__init__(self, use_gpt_4=True, *args, **kwargs)
+        LLMBase.__init__(self, llm_model=llm_model, *args, **kwargs)
 
         # load planning prompt template
         prompt_template_folder = Path(__file__).resolve().parent.parent / "prompts"

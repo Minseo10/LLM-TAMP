@@ -46,6 +46,7 @@ class TAMPRunner:
             primitive_actions=self.primitive_actions,
             with_mp_feedback=self.planner_cfg.with_mp_feedback,
             trace_size=self.planner_cfg.trace_size,
+            llm_model=getattr(cfg, "llm_model", "gpt-4o"),
         )
         self.max_llm_calls = cfg.max_llm_calls
 

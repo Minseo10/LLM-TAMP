@@ -14,6 +14,7 @@ max_llm_calls: 3  # This parameter is meaningless because the timeout is the lim
 
 timeout_sec: 600
 use_hard_timeout: True
+llm_model: gpt-4o
 
 domain_name: kitchen
 

@@ -119,8 +119,8 @@ class GPT_Chat:
 
 
 class LLMBase(abc.ABC):
-    def __init__(self, use_gpt_4: bool, *args, **kwargs):
-        engine = "gpt-4o" if use_gpt_4 else "gpt-3.5-turbo"
+    def __init__(self, llm_model: str = "gpt-4o", use_gpt_4: bool = True, *args, **kwargs):
+        engine = llm_model
         self.llm_gpt = GPT_Chat(engine=engine)
 
     def prompt_llm(self, prompt: str, temperature: float = 0.0, force_json: bool = False):
