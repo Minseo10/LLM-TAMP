@@ -70,7 +70,11 @@ class TAMPRunner:
         timed_out = False
         error_msg = ""
 
-        save_log_dir = self.save_dir / f"{prob_num}_{prob_idx}_{trial}_{repeat}"
+        # Resolve paths relative to VLM-KTAMP project root
+        project_root = Path(__file__).resolve().parent.parent
+        save_dir = project_root / f"experiments/{self.domain_name}/llm3"
+        Path(save_dir).parent.mkdir(parents=True, exist_ok=True)
+        save_log_dir = save_dir / "logs" / f"{prob_num}_{prob_idx}_{trial}_{repeat}"
         mkdir(save_log_dir)
         log_file = save_log_dir / f"main.log"
         file_handler = logging.FileHandler(log_file, mode="w", encoding="utf-8")
@@ -286,7 +290,9 @@ class TAMPRunner:
         num_steps_list = []
         num_mp_calls_list = []
         num_llm_calls_list = []
-        results_csv = Path(f"/home/minseo/develop/LLM-TAMP/experiments/{self.domain_name}/summary.csv")
+        # Resolve paths relative to VLM-KTAMP project root
+        project_root = Path(__file__).resolve().parent.parent
+        results_csv = project_root / f"experiments/{self.domain_name}/llm3/summary.csv"
         Path(results_csv).parent.mkdir(parents=True, exist_ok=True)
         fieldnames = [
             "prob_num", "prob_idx", "trial", "repeat",
@@ -337,7 +343,10 @@ class TAMPRunner:
 
                         if self.save_to_file:
                             # save tamp_plan into npz
-                            save_episode_dir = self.save_dir / f"{prob_num}_{prob_idx}_{trial}_{repeat}"
+                            project_root = Path(__file__).resolve().parent.parent
+                            save_dir = project_root / f"experiments/{self.domain_name}/llm3"
+                            Path(save_dir).parent.mkdir(parents=True, exist_ok=True)
+                            save_episode_dir = save_dir / "batch_outputs" / f"{prob_num}_{prob_idx}" / f"trial{trial}_repeat{repeat}"
                             mkdir(save_episode_dir)
                             # import pdb
 
@@ -352,7 +361,7 @@ class TAMPRunner:
                                 "num_mp_calls": num_mp_calls_list,
                                 "num_llm_calls": num_llm_calls_list,
                             }
-                            dump_json(json_data, self.save_dir / "result.json")
+                            dump_json(json_data, save_dir / "result.json")
 
                             # save in csv
                             res = {

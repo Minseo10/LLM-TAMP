@@ -113,11 +113,13 @@ class LLMTAMPPlanner(BasePlanner, LLMBase):
         if len(feedback_list) > 0 and feedback_list[-1][1].action_success:
             feedback_text += f"(Task: {feedback_list[-1][1].task_process_feedback})"
 
-        domain_path = f"/home/minseo/develop/LLM-TAMP/experiments/{domain_name}/domain_{domain_name}.pddl"
+        # Resolve paths relative to LLM-TAMP project root
+        project_root = Path(__file__).resolve().parent.parent.parent
+        domain_path = str(project_root / f"domains/domain_{domain_name}.pddl")
         with open(domain_path, "r") as f:
             domain = f.read()
 
-        problem_path = f"/home/minseo/develop/LLM-TAMP/experiments/{domain_name}/problem/{domain_name}{prob_num}_{prob_idx}.pddl"
+        problem_path = str(project_root / f"experiments/{domain_name}/problem/{domain_name}{prob_num}_{prob_idx}.pddl")
         with open(problem_path, "r") as f:
             problem = f.read()
 
